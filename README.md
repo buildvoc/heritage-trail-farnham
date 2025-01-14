@@ -4,4 +4,4 @@ Blog: https://bertt.wordpress.com/2025/01/10/creating-interactive-3d-hiking-map/
 
 Live demo: https://buildvoc.github.io/heritage-trail-farnham/
 
-![image](https://github.com/user-attachments/assets/3b5dd566-a63a-4e39-bc44-d59b000df12b)
+![Terrain-Building-height updates-13](https://github.com/user-attachments/assets/5100b389-87bb-4fcb-836b-b0e657f0c0ff)
