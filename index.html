@@ -30,8 +30,8 @@
       const map = new maplibregl.Map({
         style: 'https://tiles.openfreemap.org/styles/liberty',
         container: 'map', // container id
-        center: [0.0580312, 42.6311378], 
-        zoom: 12,
+        center: [-0.7960, 51.2140], 
+        zoom: 16,
         pitch: 61,
         bearing: 0,
         maxPitch: 85,
@@ -66,7 +66,7 @@
             }
         });
 
-      fetch('gr11.geojson')
+      fetch('LAD_Waverley_active-travel-heritage-trail-farnham.geojson')
         .then(response => response.json())
         .then(geojsonData => {
             map.addSource('line-source', {
