@@ -19,6 +19,13 @@
       bottom: 0; 
       width: 100%; 
     }
+
+    .elevation-popup {
+      background: white;
+      padding: 10px;
+      border-radius: 4px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
   </style>
 </head>
 <body>
@@ -104,6 +111,25 @@
           exaggeration: 1
         })
       );
+
+      // Add click event to show elevation
+      map.on('click', (e) => {
+        console.log(e.lngLat);
+        const elevation = map.queryTerrainElevation(e.lngLat);
+        console.log(elevation);
+        if (elevation !== null) {
+          const popup = new maplibregl.Popup()
+            .setLngLat(e.lngLat)
+            .setHTML(`
+              <div class="elevation-popup">
+                <h3>Elevation Information</h3>
+                <p>Elevation: ${Math.round(elevation)} meters</p>
+                <p>Coordinates: ${e.lngLat.lng.toFixed(4)}, ${e.lngLat.lat.toFixed(4)}</p>
+              </div>
+            `)
+            .addTo(map);
+        }
+      });
   </script>
 </body>
 </html>
