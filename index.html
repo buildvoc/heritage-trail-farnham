@@ -171,7 +171,7 @@
         buildingStatusElement.style.color = isError ? "#fca5a5" : "#bbf7d0";
       };
 
-      setBuildingStatus("Loading sample building footprint…");
+      setBuildingStatus("Loading hosted sample building footprint…");
 
       const basemapToggle = document.getElementById("toggle-basemap");
       const initialBasemapEnabled = false;
@@ -199,7 +199,9 @@
 
       const trailDataUrl =
         "LAD_Waverley_active-travel-heritage-trail-farnham.geojson";
-      const staticBuildingDataUrl = "pic2bim-building.geojson";
+      // Hosted sample footprint with "height" attribute used for polygon extrusion.
+      const staticBuildingDataUrl =
+        "https://buildvoc.github.io/heritage-trail-farnham/pic2bim-building.geojson";
 
       const initialMapState = {
         center: [-0.796, 51.214],
@@ -369,7 +371,7 @@
             currentBuildingLayer = null;
             updateDeckLayers();
             setBuildingStatus(
-              "Sample building file did not contain polygon geometry.",
+              "Hosted sample building file did not contain polygon geometry.",
               { isError: true },
             );
             return;
@@ -378,12 +380,15 @@
           currentBuildingLayer = nextBuildingLayer;
           updateDeckLayers();
           setBuildingStatus(
-            "Loaded sample building footprint. Provide pic2bim credentials locally to fetch live buildings.",
+            "Loaded hosted sample building footprint. Provide pic2bim credentials locally to fetch live buildings.",
           );
         } catch (error) {
-          console.error("Unable to load sample building footprint", error);
+          console.error(
+            "Unable to load hosted sample building footprint",
+            error,
+          );
           setBuildingStatus(
-            "Unable to load sample building footprint. Provide pic2bim credentials locally to fetch live buildings.",
+            "Unable to load hosted sample building footprint. Provide pic2bim credentials locally to fetch live buildings.",
             { isError: true },
           );
         }
