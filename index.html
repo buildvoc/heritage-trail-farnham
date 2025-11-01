@@ -14,6 +14,7 @@
       crossorigin="anonymous"
     ></script>
     <script src="https://unpkg.com/pmtiles@4.1.0/dist/pmtiles.js"></script>
+    <script src="https://unpkg.com/deck.gl@9.0.37/dist.min.js"></script>
     <style>
       body {
         margin: 0;
@@ -77,28 +78,34 @@
           }),
         );
 
-        fetch("LAD_Waverley_active-travel-heritage-trail-farnham.geojson")
-          .then((response) => response.json())
-          .then((geojsonData) => {
-            map.addSource("line-source", {
-              type: "geojson",
-              data: geojsonData,
-            });
+        const deckOverlay = new deck.MapboxOverlay({
+          layers: [
+            new deck.GeoJsonLayer({
+              id: "heritage-trail",
+              data: "LAD_Waverley_active-travel-heritage-trail-farnham.geojson",
+              lineWidthScale: 2,
+              lineWidthUnits: "pixels",
+              getLineColor: [255, 0, 0],
+              getLineWidth: 6,
+              pickable: true,
+              autoHighlight: true,
+              highlightColor: [255, 255, 0, 180],
+              parameters: {
+                depthTest: false,
+              },
+              getTooltip: ({ object }) => {
+                if (!object) {
+                  return null;
+                }
 
-            map.addLayer({
-              id: "line-layer",
-              type: "line",
-              source: "line-source",
-              layout: {
-                "line-join": "round",
-                "line-cap": "round",
+                const name = object.properties?.Name;
+                return name ? `Trail: ${name}` : "Heritage Trail";
               },
-              paint: {
-                "line-color": "#ff0000",
-                "line-width": 6,
-              },
-            });
-          });
+            }),
+          ],
+        });
+
+        map.addControl(deckOverlay);
       });
 
       map.addControl(
