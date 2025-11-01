@@ -272,19 +272,21 @@
       };
 
       const getCameraAltitude = (centerCoordinate) => {
-        const freeCamera = map.getFreeCameraOptions();
-        if (!freeCamera.position) {
-          return 0;
+        if (typeof map.getFreeCameraOptions === "function") {
+          const freeCamera = map.getFreeCameraOptions();
+          if (freeCamera?.position) {
+            const altitudeUnits =
+              freeCamera.position.z - (centerCoordinate.z ?? 0);
+            const unitsPerMeter =
+              centerCoordinate.meterInMercatorCoordinateUnits();
+
+            if (Number.isFinite(unitsPerMeter) && unitsPerMeter !== 0) {
+              return altitudeUnits / unitsPerMeter;
+            }
+          }
         }
 
-        const altitudeUnits = freeCamera.position.z - (centerCoordinate.z ?? 0);
-        const unitsPerMeter = centerCoordinate.meterInMercatorCoordinateUnits();
-
-        if (!Number.isFinite(unitsPerMeter) || unitsPerMeter === 0) {
-          return 0;
-        }
-
-        return altitudeUnits / unitsPerMeter;
+        return 50;
       };
 
       const currentFirstPersonViewState = () => {
