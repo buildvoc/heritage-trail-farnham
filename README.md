@@ -21,6 +21,11 @@ must provide your own credentials. Copy `pic2bim-credentials.sample.js` to
 username and password. The `.local.js` file is ignored by git so the secrets are
 never committed to the repository.
 
+The UI also loads deck.gl’s
+[ResetViewWidget](https://deck.gl/docs/api-reference/widgets/reset-view-widget),
+exposing a quick way to restore the camera to its initial orientation when
+experimenting with the various controller modes.
+
 ### Create a Route of your Heritage Trail
 
 After you have created your route on [Active Travel Scheme Sketcher](https://plan.activetravelengland.gov.uk/index.html)

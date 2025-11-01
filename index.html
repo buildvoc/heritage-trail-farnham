@@ -14,7 +14,12 @@
       crossorigin="anonymous"
     ></script>
     <script src="https://unpkg.com/pmtiles@4.1.0/dist/pmtiles.js"></script>
-    <script src="https://unpkg.com/deck.gl@9.0.37/dist.min.js"></script>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/@deck.gl/widgets@9.2.2/dist/stylesheet.css"
+      crossorigin="anonymous"
+    />
+    <script src="https://unpkg.com/deck.gl@9.2.2/dist.min.js"></script>
     <script src="pic2bim-building.js"></script>
     <!--
       Copy pic2bim-credentials.sample.js to pic2bim-credentials.local.js and
@@ -147,6 +152,15 @@
         _TerrainExtension,
         TerrainExtension: PublicTerrainExtension,
       } = deck;
+
+      const widgetsModulePromise = import(
+        "https://unpkg.com/@deck.gl/widgets@9.2.2/dist/index.js?module"
+      ).catch((error) => {
+        console.error("Failed to load deck.gl widgets", error);
+        return null;
+      });
+
+      let resetViewWidgetInstance = null;
 
       const {
         fetchNearestBuilding,
@@ -518,6 +532,33 @@
         map: "map-view",
         orthographic: "orthographic-view",
       };
+
+      const cloneStateEntry = (state) => {
+        if (!state) {
+          return null;
+        }
+
+        const clone = {
+          longitude: state.longitude,
+          latitude: state.latitude,
+          bearing: state.bearing,
+          pitch: state.pitch,
+          zoom: state.zoom,
+        };
+
+        if (Array.isArray(state.position)) {
+          clone.position = [...state.position];
+        }
+
+        return clone;
+      };
+
+      const wrapViewStateFromStore = (mode, store) => {
+        const viewId = viewModeIds[mode] ?? viewModeIds.firstPerson;
+        const entry = cloneStateEntry(store?.[mode]);
+        return entry ? { [viewId]: entry } : {};
+      };
+
       const pitchLimits = { min: 0, max: 85 };
       const fallbackCameraAltitude = 120;
       let freeCameraWarningLogged = false;
@@ -645,7 +686,8 @@
       const wrapViewStateForMode = (mode) => {
         const viewId = viewModeIds[mode] ?? viewModeIds.firstPerson;
         const state = cloneViewStateForMode(mode);
-        return state ? { [viewId]: state } : {};
+        const entry = cloneStateEntry(state);
+        return entry ? { [viewId]: entry } : {};
       };
 
       const setViewStateForMode = (mode, nextState) => {
@@ -726,10 +768,76 @@
         });
       };
 
+      const initialViewStateStore = createInitialViewStates();
       let viewStateStore = createInitialViewStates();
+      const wrapInitialViewStateForMode = (mode) =>
+        wrapViewStateFromStore(mode, initialViewStateStore);
       let currentViewMode = "firstPerson";
       let insetUserInteracting = false;
       let insetProgrammaticUpdate = false;
+
+      let resetViewWidgetConstructorPromise = null;
+
+      const getResetViewWidgetConstructor = async () => {
+        if (!resetViewWidgetConstructorPromise) {
+          resetViewWidgetConstructorPromise = widgetsModulePromise.then(
+            (module) => {
+              if (!module) {
+                return null;
+              }
+
+              const candidates = [
+                module.ResetViewWidget,
+                module?.default?.ResetViewWidget,
+                module?.widgets?.ResetViewWidget,
+                module?.default,
+              ];
+
+              for (const candidate of candidates) {
+                if (typeof candidate === "function") {
+                  return candidate;
+                }
+              }
+
+              console.warn(
+                "ResetViewWidget constructor unavailable from deck.gl widgets module.",
+              );
+              return null;
+            },
+          );
+        }
+
+        return resetViewWidgetConstructorPromise;
+      };
+
+      const ensureResetViewWidget = async () => {
+        if (!deckInstance) {
+          return;
+        }
+
+        const ResetViewWidgetCtor = await getResetViewWidgetConstructor();
+        if (!ResetViewWidgetCtor) {
+          return;
+        }
+
+        const widgetProps = {
+          viewId: viewModeIds[currentViewMode],
+          initialViewState: wrapInitialViewStateForMode(currentViewMode),
+          label: "Reset view",
+        };
+
+        if (resetViewWidgetInstance) {
+          resetViewWidgetInstance.setProps(widgetProps);
+          return;
+        }
+
+        try {
+          resetViewWidgetInstance = new ResetViewWidgetCtor(widgetProps);
+          deckInstance.addWidget(resetViewWidgetInstance);
+        } catch (error) {
+          console.error("Unable to initialize ResetViewWidget", error);
+        }
+      };
 
       if (mapInset) {
         mapInset.on("movestart", () => {
@@ -870,6 +978,8 @@
         },
       });
 
+      void ensureResetViewWidget();
+
       const syncDeckFromMap = () => {
         if (syncingFromDeck) {
           return;
@@ -896,6 +1006,7 @@
           viewState: wrapViewStateForMode(mode),
         });
         syncInsetViewFromDeck();
+        void ensureResetViewWidget();
       };
 
       const handleViewShortcut = (event) => {
