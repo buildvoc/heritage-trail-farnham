@@ -277,6 +277,11 @@
             ...current,
             position: [0, 0, altitude],
           });
+          setViewStateForMode("orbit", {
+            longitude: lng,
+            latitude: lat,
+            target: [lng, lat, altitude],
+          });
         }
 
         syncDeckFromMap();
@@ -287,11 +292,12 @@
           return;
         }
 
-        const { longitude, latitude } = target;
+        const { longitude, latitude, altitude } = target;
         if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) {
           return;
         }
 
+        const previousOrbit = cloneViewStateForMode("orbit");
         const targetZoom = Number.isFinite(options.zoom)
           ? options.zoom
           : Math.max(map.getZoom(), 18);
@@ -307,6 +313,26 @@
           zoom: targetZoom,
           bearing: targetBearing,
           pitch: targetPitch,
+        });
+
+        let targetAltitude = Number.isFinite(altitude) ? altitude : null;
+        if (!Number.isFinite(targetAltitude)) {
+          const previousAltitude = Number.isFinite(previousOrbit?.target?.[2])
+            ? previousOrbit.target[2]
+            : getCameraAltitude();
+          targetAltitude = Number.isFinite(previousAltitude)
+            ? previousAltitude
+            : null;
+        }
+
+        if (!Number.isFinite(targetAltitude) || targetAltitude <= 0) {
+          targetAltitude = 20;
+        }
+
+        setViewStateForMode("orbit", {
+          longitude,
+          latitude,
+          target: [longitude, latitude, targetAltitude],
         });
 
         syncDeckFromMap();
@@ -1223,14 +1249,72 @@
         return bounds;
       };
 
+      const computeOrbitTargetAltitude = (features, bounds) => {
+        if (!bounds || !Array.isArray(features) || features.length === 0) {
+          return null;
+        }
+
+        const metersPerDegreeLat = 111320;
+        const centerLatitude = (bounds.minLat + bounds.maxLat) / 2;
+        const metersPerDegreeLon =
+          Math.max(Math.cos((centerLatitude * Math.PI) / 180), 0) *
+          metersPerDegreeLat;
+
+        const latSpan =
+          Math.abs(bounds.maxLat - bounds.minLat) * metersPerDegreeLat;
+        const lonSpan =
+          Math.abs(bounds.maxLon - bounds.minLon) * metersPerDegreeLon;
+
+        const candidateAltitudes = [];
+
+        if (Number.isFinite(latSpan) && latSpan > 0) {
+          candidateAltitudes.push(latSpan * 0.75);
+        }
+        if (Number.isFinite(lonSpan) && lonSpan > 0) {
+          candidateAltitudes.push(lonSpan * 0.75);
+        }
+
+        const diagonal = Math.hypot(latSpan, lonSpan);
+        if (Number.isFinite(diagonal) && diagonal > 0) {
+          candidateAltitudes.push(diagonal * 0.5);
+        }
+
+        if (typeof parseBuildingHeight === "function") {
+          for (const feature of features) {
+            const height = parseBuildingHeight(feature?.properties ?? {});
+            if (Number.isFinite(height) && height > 0) {
+              candidateAltitudes.push(height * 0.6);
+            }
+          }
+        }
+
+        const altitude = candidateAltitudes.reduce(
+          (maxAltitude, value) =>
+            Number.isFinite(value) && value > maxAltitude ? value : maxAltitude,
+          0,
+        );
+
+        if (!Number.isFinite(altitude) || altitude <= 0) {
+          return 20;
+        }
+
+        return Math.max(altitude, 20);
+      };
+
       const deriveFocusTarget = (features) => {
         const bounds = collectFeatureBounds(features);
         if (!bounds) {
           return null;
         }
+
+        const longitude = (bounds.minLon + bounds.maxLon) / 2;
+        const latitude = (bounds.minLat + bounds.maxLat) / 2;
+        const altitude = computeOrbitTargetAltitude(features, bounds);
+
         return {
-          longitude: (bounds.minLon + bounds.maxLon) / 2,
-          latitude: (bounds.minLat + bounds.maxLat) / 2,
+          longitude,
+          latitude,
+          altitude,
         };
       };
 
