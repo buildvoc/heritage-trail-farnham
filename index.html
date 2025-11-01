@@ -49,8 +49,8 @@
       const {
         Deck,
         GeoJsonLayer,
-        OrbitController,
-        OrbitView,
+        FirstPersonController,
+        FirstPersonView,
         TerrainLayer,
         COORDINATE_SYSTEM,
         _TerrainExtension,
@@ -117,7 +117,7 @@
           clearColor: [0, 0, 0, 0],
         },
         controller: {
-          type: OrbitController,
+          type: FirstPersonController,
           dragMode: "pan",
           keyboard: false,
         },
@@ -126,32 +126,29 @@
             return;
           }
 
-          if (!Array.isArray(viewState.target)) {
+          if (
+            !Number.isFinite(viewState.longitude) ||
+            !Number.isFinite(viewState.latitude)
+          ) {
             return;
           }
 
           deckSyncInProgress = true;
           try {
-            const targetCoordinate = new maplibregl.MercatorCoordinate(
-              viewState.target[0],
-              viewState.target[1],
-              viewState.target[2] ?? 0,
-            ).toLngLat();
-
             map.jumpTo({
-              center: [targetCoordinate.lng, targetCoordinate.lat],
+              center: [viewState.longitude, viewState.latitude],
               zoom: viewState.zoom,
-              pitch: viewState.rotationX,
-              bearing: viewState.rotationOrbit,
+              pitch: viewState.pitch,
+              bearing: viewState.bearing,
             });
           } finally {
             deckSyncInProgress = false;
           }
         },
         views: [
-          new OrbitView({
-            id: "orbit-view",
-            fov: 50,
+          new FirstPersonView({
+            id: "first-person-view",
+            fovy: 50,
           }),
         ],
         layers: [],
@@ -265,25 +262,44 @@
         parameters: {
           depthTest: false,
         },
-        coordinateSystem: COORDINATE_SYSTEM.CARTESIAN,
+        coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
         extensions: terrainExtension ? [terrainExtension] : [],
         terrainDrawMode: "offset",
         getElevation: (feature) => (feature.geometry.type === "Point" ? 12 : 6),
       };
 
-      const currentOrbitViewState = () => {
+      const getCameraAltitude = (centerCoordinate) => {
+        const freeCamera = map.getFreeCameraOptions();
+        if (!freeCamera.position) {
+          return 0;
+        }
+
+        const altitudeUnits = freeCamera.position.z - (centerCoordinate.z ?? 0);
+        const unitsPerMeter = centerCoordinate.meterInMercatorCoordinateUnits();
+
+        if (!Number.isFinite(unitsPerMeter) || unitsPerMeter === 0) {
+          return 0;
+        }
+
+        return altitudeUnits / unitsPerMeter;
+      };
+
+      const currentFirstPersonViewState = () => {
         const center = map.getCenter();
-        const centerMercator = maplibregl.MercatorCoordinate.fromLngLat(
+        const centerCoordinate = maplibregl.MercatorCoordinate.fromLngLat(
           { lng: center.lng, lat: center.lat },
           0,
         );
+
         return {
-          target: [centerMercator.x, centerMercator.y, centerMercator.z ?? 0],
-          rotationOrbit: map.getBearing(),
-          rotationX: map.getPitch(),
+          longitude: center.lng,
+          latitude: center.lat,
           zoom: map.getZoom(),
-          minZoom: map.getMinZoom(),
-          maxZoom: map.getMaxZoom(),
+          pitch: map.getPitch(),
+          bearing: map.getBearing(),
+          position: [0, 0, getCameraAltitude(centerCoordinate)],
+          maxPitch: map.getMaxPitch(),
+          minPitch: map.getMinPitch ? map.getMinPitch() : undefined,
         };
       };
 
@@ -295,7 +311,7 @@
         mapSyncInProgress = true;
         try {
           deckgl.setProps({
-            viewState: currentOrbitViewState(),
+            viewState: currentFirstPersonViewState(),
           });
         } finally {
           mapSyncInProgress = false;
@@ -313,37 +329,6 @@
           tooltip.style.display = "none";
         }
       };
-
-      const toMercatorPosition = (coords) => {
-        const [lng, lat, altitude = 0] = coords;
-        const mercator = maplibregl.MercatorCoordinate.fromLngLat(
-          { lng, lat },
-          altitude,
-        );
-        return [mercator.x, mercator.y, mercator.z ?? 0];
-      };
-
-      const convertGeometryToMercator = (geometry) => {
-        const convert = (coordinates) => {
-          if (typeof coordinates[0] === "number") {
-            return toMercatorPosition(coordinates);
-          }
-          return coordinates.map(convert);
-        };
-
-        return {
-          ...geometry,
-          coordinates: convert(geometry.coordinates),
-        };
-      };
-
-      const convertFeatureCollectionToMercator = (featureCollection) => ({
-        ...featureCollection,
-        features: featureCollection.features.map((feature) => ({
-          ...feature,
-          geometry: convertGeometryToMercator(feature.geometry),
-        })),
-      });
 
       const createTrailLayer = (data, terrainConfig) =>
         new GeoJsonLayer({
@@ -410,11 +395,10 @@
               throw new Error(`Failed to load trail data: ${response.status}`);
             }
             const geojson = await response.json();
-            const mercatorGeojson = convertFeatureCollectionToMercator(geojson);
             const terrainConfig = createTerrainExtensionConfig(bounds);
             const layers = [createTerrainLayer(bounds)];
 
-            layers.push(createTrailLayer(mercatorGeojson, terrainConfig));
+            layers.push(createTrailLayer(geojson, terrainConfig));
 
             deckgl.setProps({
               layers,
