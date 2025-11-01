@@ -276,6 +276,36 @@
         syncDeckFromMap();
       };
 
+      const focusViewOnTarget = (target, options = {}) => {
+        if (!target) {
+          return;
+        }
+
+        const { longitude, latitude } = target;
+        if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) {
+          return;
+        }
+
+        const targetZoom = Number.isFinite(options.zoom)
+          ? options.zoom
+          : Math.max(map.getZoom(), 18);
+        const targetBearing = Number.isFinite(options.bearing)
+          ? options.bearing
+          : map.getBearing();
+        const targetPitch = Number.isFinite(options.pitch)
+          ? clampPitch(options.pitch)
+          : clampPitch(map.getPitch());
+
+        map.jumpTo({
+          center: [longitude, latitude],
+          zoom: targetZoom,
+          bearing: targetBearing,
+          pitch: targetPitch,
+        });
+
+        syncDeckFromMap();
+      };
+
       const handleBuildingFetch = async () => {
         if (!fetchBuildingButton) {
           return;
@@ -307,10 +337,8 @@
 
           const bounds = await terrainConfigPromise;
           const terrainConfig = createTerrainExtensionConfig(bounds);
-          const nextBuildingLayer = createBuildingLayer(
-            result.geojson,
-            terrainConfig,
-          );
+          const { layer: nextBuildingLayer, focusTarget } =
+            prepareBuildingLayer(result.geojson, terrainConfig);
 
           if (!nextBuildingLayer) {
             currentBuildingLayer = null;
@@ -331,8 +359,14 @@
             "Building";
           setBuildingStatus(`Loaded building data for ${featureName}.`);
 
+          let cameraApplied = false;
           if (Array.isArray(result.cameraGPSData) && result.cameraGPSData[0]) {
             focusMapOnCamera(result.cameraGPSData[0]);
+            cameraApplied = true;
+          }
+
+          if (!cameraApplied && focusTarget) {
+            focusViewOnTarget(focusTarget);
           }
         } catch (error) {
           console.error("Building fetch failed", error);
@@ -360,7 +394,8 @@
 
           const geojson = await response.json();
           const terrainConfig = createTerrainExtensionConfig(bounds);
-          const nextBuildingLayer = createBuildingLayer(geojson, terrainConfig);
+          const { layer: nextBuildingLayer, focusTarget } =
+            prepareBuildingLayer(geojson, terrainConfig);
 
           if (!nextBuildingLayer) {
             currentBuildingLayer = null;
@@ -377,6 +412,10 @@
           setBuildingStatus(
             "Loaded bundled sample building footprint. Provide pic2bim credentials locally to fetch live buildings.",
           );
+
+          if (focusTarget) {
+            focusViewOnTarget(focusTarget, { zoom: 18 });
+          }
         } catch (error) {
           console.error(
             "Unable to load bundled sample building footprint",
@@ -803,17 +842,95 @@
         terrainDrawMode: "offset",
       };
 
-      const createBuildingLayer = (data, terrainConfig) => {
-        const features = normalizeBuildingFeatures(data);
-        if (!features.length) {
+      const collectFeatureBounds = (features) => {
+        const bounds = {
+          minLon: Infinity,
+          minLat: Infinity,
+          maxLon: -Infinity,
+          maxLat: -Infinity,
+        };
+
+        const updateBounds = (position) => {
+          if (!Array.isArray(position) || position.length < 2) {
+            return;
+          }
+          const [lon, lat] = position;
+          if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
+            return;
+          }
+          bounds.minLon = Math.min(bounds.minLon, lon);
+          bounds.maxLon = Math.max(bounds.maxLon, lon);
+          bounds.minLat = Math.min(bounds.minLat, lat);
+          bounds.maxLat = Math.max(bounds.maxLat, lat);
+        };
+
+        const visitPolygon = (polygon) => {
+          if (!Array.isArray(polygon)) {
+            return;
+          }
+          for (const ring of polygon) {
+            if (!Array.isArray(ring)) {
+              continue;
+            }
+            for (const position of ring) {
+              updateBounds(position);
+            }
+          }
+        };
+
+        for (const feature of features) {
+          const geometry = feature?.geometry;
+          if (!geometry) {
+            continue;
+          }
+          if (geometry.type === "Polygon") {
+            visitPolygon(geometry.coordinates);
+          } else if (geometry.type === "MultiPolygon") {
+            if (!Array.isArray(geometry.coordinates)) {
+              continue;
+            }
+            for (const polygon of geometry.coordinates) {
+              visitPolygon(polygon);
+            }
+          }
+        }
+
+        if (
+          !Number.isFinite(bounds.minLon) ||
+          !Number.isFinite(bounds.maxLon) ||
+          !Number.isFinite(bounds.minLat) ||
+          !Number.isFinite(bounds.maxLat)
+        ) {
           return null;
         }
 
-        return new PolygonLayer({
+        return bounds;
+      };
+
+      const deriveFocusTarget = (features) => {
+        const bounds = collectFeatureBounds(features);
+        if (!bounds) {
+          return null;
+        }
+        return {
+          longitude: (bounds.minLon + bounds.maxLon) / 2,
+          latitude: (bounds.minLat + bounds.maxLat) / 2,
+        };
+      };
+
+      const prepareBuildingLayer = (data, terrainConfig) => {
+        const features = normalizeBuildingFeatures(data);
+        if (!features.length) {
+          return { layer: null, focusTarget: null };
+        }
+
+        const layer = new PolygonLayer({
           ...buildingLayerProps,
           data: features,
           terrain: terrainConfig || undefined,
         });
+
+        return { layer, focusTarget: deriveFocusTarget(features) };
       };
 
       const terrainSourceId = "terrainSource";
