@@ -288,7 +288,13 @@
       }
 
       let resetViewWidgetInstance = null;
-      let resetViewWidgetAdded = false;
+      const deckWidgetRegistry = [];
+      const syncDeckWidgets = () => {
+        if (!deckInstance || !hasDeckWidgetSupport) {
+          return;
+        }
+        deckInstance.setProps({ widgets: [...deckWidgetRegistry] });
+      };
 
       const {
         fetchNearestBuilding,
@@ -924,16 +930,16 @@
 
         if (resetViewWidgetInstance) {
           resetViewWidgetInstance.setProps(widgetProps);
+          syncDeckWidgets();
           return;
         }
 
-        resetViewWidgetInstance = new InlineResetViewWidget(widgetProps);
-
         try {
-          if (!resetViewWidgetAdded) {
-            deckInstance.addWidget(resetViewWidgetInstance);
-            resetViewWidgetAdded = true;
+          resetViewWidgetInstance = new InlineResetViewWidget(widgetProps);
+          if (!deckWidgetRegistry.includes(resetViewWidgetInstance)) {
+            deckWidgetRegistry.push(resetViewWidgetInstance);
           }
+          syncDeckWidgets();
         } catch (error) {
           console.error("Unable to initialize ResetViewWidget", error);
         }
@@ -1049,10 +1055,11 @@
       deckInstance = new Deck({
         parent: deckContainer,
         views: [createViewForMode(currentViewMode)],
-        initialViewState: wrapViewStateForMode(currentViewMode),
+        initialViewState: wrapInitialViewStateForMode(currentViewMode),
         viewState: wrapViewStateForMode(currentViewMode),
         layers: [],
         getTooltip: (info) => tooltipFormatter(info),
+        widgets: hasDeckWidgetSupport ? [...deckWidgetRegistry] : undefined,
         onViewStateChange: ({ viewState, viewId }) => {
           const mode = viewIdToMode[viewId] ?? currentViewMode;
           if (syncingFromMap || mode !== currentViewMode) {
