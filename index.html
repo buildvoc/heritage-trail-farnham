@@ -119,21 +119,23 @@
       deckCanvas.setAttribute("tabindex", "0");
       overlayContainer.appendChild(deckCanvas);
 
+      const FIRST_PERSON_VIEW_ID = "firstPersonView";
+
       const deckInstance = new Deck({
         canvas: deckCanvas,
         width: "100%",
         height: "100%",
-        controller: {
-          type: FirstPersonController,
-          dragMode: "rotate",
-          dragPan: true,
-          keyboard: true,
-          scrollZoom: true,
-        },
         views: [
           new FirstPersonView({
-            id: "firstPersonView",
+            id: FIRST_PERSON_VIEW_ID,
             fovy: 50,
+            controller: {
+              type: FirstPersonController,
+              dragMode: "rotate",
+              dragPan: true,
+              keyboard: true,
+              scrollZoom: true,
+            },
           }),
         ],
         layers: [],
@@ -298,11 +300,18 @@
       const currentFirstPersonViewState = () => ({
         ...mapViewState(),
         position: [0, 0, approximateCameraAltitude()],
+        maxPitch: 85,
       });
 
       const updateDeckViewStateFromMap = () => {
-        deckInstance.setProps({ viewState: currentFirstPersonViewState() });
+        deckInstance.setProps({
+          viewState: {
+            [FIRST_PERSON_VIEW_ID]: currentFirstPersonViewState(),
+          },
+        });
       };
+
+      updateDeckViewStateFromMap();
 
       const focusDeckCanvas = () => {
         requestAnimationFrame(() => deckCanvas.focus());
@@ -319,17 +328,31 @@
 
       let suppressMapSync = false;
 
+      const normalizeDeckViewState = (viewState) => {
+        if (!viewState) {
+          return null;
+        }
+        if (FIRST_PERSON_VIEW_ID in viewState) {
+          return viewState[FIRST_PERSON_VIEW_ID];
+        }
+        return viewState;
+      };
+
       deckInstance.setProps({
         onViewStateChange: ({ viewState }) => {
-          if (!viewState || suppressMapSync) {
+          const firstPersonViewState = normalizeDeckViewState(viewState);
+          if (!firstPersonViewState || suppressMapSync) {
             return;
           }
           suppressMapSync = true;
           map.jumpTo({
-            center: [viewState.longitude, viewState.latitude],
-            zoom: viewState.zoom,
-            pitch: viewState.pitch,
-            bearing: viewState.bearing,
+            center: [
+              firstPersonViewState.longitude,
+              firstPersonViewState.latitude,
+            ],
+            zoom: firstPersonViewState.zoom,
+            pitch: firstPersonViewState.pitch,
+            bearing: firstPersonViewState.bearing,
           });
           map.once("moveend", () => {
             suppressMapSync = false;
