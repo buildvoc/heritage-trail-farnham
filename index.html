@@ -33,7 +33,9 @@
     <script>
       const protocol = new pmtiles.Protocol();
       maplibregl.addProtocol("pmtiles", protocol.tile);
-      const url = "output.pmtiles";
+      const pmtilesUrl = "output.pmtiles";
+      const pmtilesSource = new pmtiles.PMTiles(pmtilesUrl);
+      protocol.add(pmtilesSource);
       const map = new maplibregl.Map({
         style: "https://tiles.openfreemap.org/styles/liberty",
         container: "map", // container id
@@ -48,13 +50,7 @@
       map.on("load", () => {
         map.addSource("terrainSource", {
           type: "raster-dem",
-          url: `pmtiles://${url}`,
-          tileSize: 256,
-        });
-
-        map.addSource("hillshadeSource", {
-          type: "raster-dem",
-          url: `pmtiles://${url}`,
+          url: `pmtiles://${pmtilesUrl}`,
           tileSize: 256,
         });
 
@@ -66,7 +62,7 @@
         map.addLayer({
           id: "hillshadeLayer",
           type: "hillshade",
-          source: "hillshadeSource",
+          source: "terrainSource",
           paint: {
             "hillshade-shadow-color": "#000000",
             "hillshade-highlight-color": "#ffffff",
