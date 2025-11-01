@@ -142,8 +142,6 @@
         FirstPersonView,
         MapController,
         MapView,
-        OrbitController,
-        OrbitView,
         PolygonLayer,
         COORDINATE_SYSTEM,
         _TerrainExtension,
@@ -277,11 +275,6 @@
             ...current,
             position: [0, 0, altitude],
           });
-          setViewStateForMode("orbit", {
-            longitude: lng,
-            latitude: lat,
-            target: [lng, lat, altitude],
-          });
         }
 
         syncDeckFromMap();
@@ -297,7 +290,6 @@
           return;
         }
 
-        const previousOrbit = cloneViewStateForMode("orbit");
         const targetZoom = Number.isFinite(options.zoom)
           ? options.zoom
           : Math.max(map.getZoom(), 18);
@@ -317,8 +309,11 @@
 
         let targetAltitude = Number.isFinite(altitude) ? altitude : null;
         if (!Number.isFinite(targetAltitude)) {
-          const previousAltitude = Number.isFinite(previousOrbit?.target?.[2])
-            ? previousOrbit.target[2]
+          const previousFirstPerson = cloneViewStateForMode("firstPerson");
+          const previousAltitude = Number.isFinite(
+            previousFirstPerson?.position?.[2],
+          )
+            ? previousFirstPerson.position[2]
             : getCameraAltitude();
           targetAltitude = Number.isFinite(previousAltitude)
             ? previousAltitude
@@ -329,10 +324,10 @@
           targetAltitude = 20;
         }
 
-        setViewStateForMode("orbit", {
-          longitude,
-          latitude,
-          target: [longitude, latitude, targetAltitude],
+        const currentFirstPerson = cloneViewStateForMode("firstPerson") ?? {};
+        setViewStateForMode("firstPerson", {
+          ...currentFirstPerson,
+          position: [0, 0, targetAltitude],
         });
 
         syncDeckFromMap();
@@ -522,7 +517,6 @@
         firstPerson: "first-person-view",
         map: "map-view",
         orthographic: "orthographic-view",
-        orbit: "orbit-view",
       };
       const pitchLimits = { min: 0, max: 85 };
       const fallbackCameraAltitude = 120;
@@ -595,7 +589,6 @@
       const createInitialViewStates = () => {
         const base = getMapDerivedBaseState();
         const altitude = getCameraAltitude();
-        const orbitTarget = [base.longitude, base.latitude, 0];
         return {
           firstPerson: {
             ...base,
@@ -603,12 +596,6 @@
           },
           map: { ...base },
           orthographic: { ...base, pitch: 0 },
-          orbit: {
-            ...base,
-            target: orbitTarget,
-            rotationOrbit: -base.bearing,
-            rotationX: base.pitch,
-          },
         };
       };
 
@@ -650,27 +637,6 @@
           );
         } else if (Array.isArray(existing.position)) {
           state.position = [...existing.position];
-        }
-
-        if (mode === "orbit") {
-          const previousTarget = Array.isArray(existing.target)
-            ? existing.target
-            : [state.longitude, state.latitude, 0];
-          state.target = [
-            Number.isFinite(previousTarget[0])
-              ? previousTarget[0]
-              : state.longitude,
-            Number.isFinite(previousTarget[1])
-              ? previousTarget[1]
-              : state.latitude,
-            Number.isFinite(previousTarget[2]) ? previousTarget[2] : 0,
-          ];
-          state.rotationOrbit = Number.isFinite(existing.rotationOrbit)
-            ? existing.rotationOrbit
-            : -state.bearing;
-          state.rotationX = Number.isFinite(existing.rotationX)
-            ? existing.rotationX
-            : state.pitch;
         }
 
         return state;
@@ -736,55 +702,6 @@
           normalized.position = [...nextState.position];
         }
 
-        if (mode === "orbit") {
-          const previousTarget = Array.isArray(previous?.target)
-            ? previous.target
-            : [longitude, latitude, 0];
-          const requestedTarget = Array.isArray(nextState?.target)
-            ? nextState.target
-            : previousTarget;
-          const targetLongitude = Number.isFinite(requestedTarget[0])
-            ? requestedTarget[0]
-            : longitude;
-          const targetLatitude = Number.isFinite(requestedTarget[1])
-            ? requestedTarget[1]
-            : latitude;
-          const targetAltitude = Number.isFinite(requestedTarget[2])
-            ? requestedTarget[2]
-            : Number.isFinite(previousTarget[2])
-              ? previousTarget[2]
-              : 0;
-
-          longitude = targetLongitude;
-          latitude = targetLatitude;
-
-          const rotationOrbit = Number.isFinite(nextState?.rotationOrbit)
-            ? nextState.rotationOrbit
-            : Number.isFinite(previous?.rotationOrbit)
-              ? previous.rotationOrbit
-              : -bearing;
-          const rotationX = Number.isFinite(nextState?.rotationX)
-            ? nextState.rotationX
-            : Number.isFinite(previous?.rotationX)
-              ? previous.rotationX
-              : pitch;
-
-          bearing = Number.isFinite(nextState?.bearing)
-            ? nextState.bearing
-            : normalizeBearing(-rotationOrbit);
-          pitch = clampPitch(
-            Number.isFinite(nextState?.pitch) ? nextState.pitch : rotationX,
-          );
-
-          normalized.longitude = longitude;
-          normalized.latitude = latitude;
-          normalized.bearing = bearing;
-          normalized.pitch = pitch;
-          normalized.target = [targetLongitude, targetLatitude, targetAltitude];
-          normalized.rotationOrbit = rotationOrbit;
-          normalized.rotationX = rotationX;
-        }
-
         viewStateStore[mode] = normalized;
         return normalized;
       };
@@ -834,10 +751,6 @@
           position: [0, 0, altitude],
         };
 
-        const previousOrbit = cloneViewStateForMode("orbit") ?? {
-          target: [base.longitude, base.latitude, 0],
-        };
-
         viewStateStore = {
           firstPerson: {
             ...base,
@@ -856,19 +769,6 @@
             ...viewStateStore.orthographic,
             ...base,
             pitch: 0,
-          },
-          orbit: {
-            ...viewStateStore.orbit,
-            ...base,
-            target: [
-              base.longitude,
-              base.latitude,
-              Number.isFinite(previousOrbit.target?.[2])
-                ? previousOrbit.target[2]
-                : 0,
-            ],
-            rotationOrbit: -base.bearing,
-            rotationX: base.pitch,
           },
         };
       };
@@ -895,13 +795,6 @@
           scrollZoom: true,
           keyboard: true,
         },
-        orbit: {
-          type: OrbitController,
-          dragMode: "rotate",
-          dragPan: true,
-          scrollZoom: true,
-          keyboard: true,
-        },
       };
 
       const createViewForMode = (mode) => {
@@ -916,12 +809,6 @@
             id: viewModeIds.orthographic,
             controller: viewControllers.orthographic,
             orthographic: true,
-          });
-        }
-        if (mode === "orbit") {
-          return new OrbitView({
-            id: viewModeIds.orbit,
-            controller: viewControllers.orbit,
           });
         }
         return new FirstPersonView({
@@ -1036,9 +923,6 @@
         } else if (key === "D") {
           event.preventDefault();
           setViewMode("firstPerson");
-        } else if (key === "O") {
-          event.preventDefault();
-          setViewMode("orbit");
         }
       };
 
@@ -1249,7 +1133,7 @@
         return bounds;
       };
 
-      const computeOrbitTargetAltitude = (features, bounds) => {
+      const computeFocusTargetAltitude = (features, bounds) => {
         if (!bounds || !Array.isArray(features) || features.length === 0) {
           return null;
         }
@@ -1309,7 +1193,7 @@
 
         const longitude = (bounds.minLon + bounds.maxLon) / 2;
         const latitude = (bounds.minLat + bounds.maxLat) / 2;
-        const altitude = computeOrbitTargetAltitude(features, bounds);
+        const altitude = computeFocusTargetAltitude(features, bounds);
 
         return {
           longitude,
