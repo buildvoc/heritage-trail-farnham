@@ -126,7 +126,9 @@
     <div id="map"></div>
     <div id="map-inset" aria-label="Inset terrain map"></div>
     <div id="building-controls">
-      <button id="fetch-building" type="button">Fetch nearest building</button>
+      <button id="fetch-building" type="button">
+        Fetch nearest building (pic2bim API)
+      </button>
       <label for="toggle-basemap">
         <input type="checkbox" id="toggle-basemap" name="toggle-basemap" />
         Show basemap and terrain
@@ -169,9 +171,7 @@
         buildingStatusElement.style.color = isError ? "#fca5a5" : "#bbf7d0";
       };
 
-      setBuildingStatus(
-        "Provide pic2bim credentials locally to enable building fetching.",
-      );
+      setBuildingStatus("Loading sample building footprint…");
 
       const basemapToggle = document.getElementById("toggle-basemap");
       const initialBasemapEnabled = false;
@@ -199,6 +199,7 @@
 
       const trailDataUrl =
         "LAD_Waverley_active-travel-heritage-trail-farnham.geojson";
+      const staticBuildingDataUrl = "pic2bim-building.geojson";
 
       const initialMapState = {
         center: [-0.796, 51.214],
@@ -344,6 +345,47 @@
           );
         } finally {
           fetchBuildingButton.disabled = false;
+        }
+      };
+
+      const loadSampleBuildingLayer = async () => {
+        try {
+          const [bounds, response] = await Promise.all([
+            terrainConfigPromise,
+            fetch(staticBuildingDataUrl),
+          ]);
+
+          if (!response.ok) {
+            throw new Error(
+              `Failed to load sample building data: ${response.status}`,
+            );
+          }
+
+          const geojson = await response.json();
+          const terrainConfig = createTerrainExtensionConfig(bounds);
+          const nextBuildingLayer = createBuildingLayer(geojson, terrainConfig);
+
+          if (!nextBuildingLayer) {
+            currentBuildingLayer = null;
+            updateDeckLayers();
+            setBuildingStatus(
+              "Sample building file did not contain polygon geometry.",
+              { isError: true },
+            );
+            return;
+          }
+
+          currentBuildingLayer = nextBuildingLayer;
+          updateDeckLayers();
+          setBuildingStatus(
+            "Loaded sample building footprint. Provide pic2bim credentials locally to fetch live buildings.",
+          );
+        } catch (error) {
+          console.error("Unable to load sample building footprint", error);
+          setBuildingStatus(
+            "Unable to load sample building footprint. Provide pic2bim credentials locally to fetch live buildings.",
+            { isError: true },
+          );
         }
       };
 
@@ -905,6 +947,7 @@
         syncDeckFromMap();
 
         ensureTerrainResources();
+        void loadSampleBuildingLayer();
 
         const initializeTrailLayer = async () => {
           try {

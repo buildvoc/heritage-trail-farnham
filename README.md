@@ -10,11 +10,14 @@ Live demo: [https://buildvoc.github.io/heritage-trail-farnham/](https://buildvoc
 
 ### Local pic2bim credentials
 
-To enable the optional pic2bim building lookup integration you must provide your
-own credentials. Copy `pic2bim-credentials.sample.js` to
+A sample building footprint stored in `pic2bim-building.geojson` is loaded by
+default so you can see an extruded polygon without configuring any external
+services. To enable the optional pic2bim building lookup integration you must
+provide your own credentials. Copy `pic2bim-credentials.sample.js` to
 `pic2bim-credentials.local.js` and replace the placeholder values with your
 username and password. The `.local.js` file is ignored by git so the secrets are
 never committed to the repository.
 
 ### Create a Route of your Heritage Trail
+
 After you have created your route on [Active Travel Scheme Sketcher](https://plan.activetravelengland.gov.uk/index.html)
