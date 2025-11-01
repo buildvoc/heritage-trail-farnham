@@ -28,6 +28,13 @@
         width: 100%;
       }
 
+      #deck-overlay {
+        position: absolute;
+        inset: 0;
+        z-index: 5;
+        pointer-events: auto;
+      }
+
       .maplibregl-ctrl-top-right {
         z-index: 6;
       }
@@ -37,11 +44,13 @@
     <div id="map"></div>
     <script>
       const {
+        Deck,
+        FirstPersonController,
+        FirstPersonView,
         GeoJsonLayer,
         COORDINATE_SYSTEM,
         _TerrainExtension,
         TerrainExtension: PublicTerrainExtension,
-        MapboxOverlay,
       } = deck;
 
       const protocol = new pmtiles.Protocol();
@@ -72,13 +81,194 @@
         ? new TerrainExtension({ terrainDrawMode: "offset" })
         : null;
 
-      const deckOverlay = new MapboxOverlay({
-        interleaved: true,
-        layers: [],
-        getTooltip: ({ object }) => tooltipFormatter(object),
+      const mapElement = document.getElementById("map");
+      const deckContainer = document.createElement("div");
+      deckContainer.id = "deck-overlay";
+      deckContainer.style.touchAction = "none";
+      mapElement.append(deckContainer);
+
+      const tooltipFormatter = (feature) =>
+        feature
+          ? `Trail: ${feature.properties?.name ?? "Heritage Trail"}`
+          : null;
+
+      const firstPersonViewId = "first-person-view";
+      const pitchLimits = { min: 0, max: 85 };
+      const fallbackCameraAltitude = 120;
+      let freeCameraWarningLogged = false;
+
+      const clampPitch = (value) =>
+        Math.max(
+          pitchLimits.min,
+          Math.min(pitchLimits.max, value ?? pitchLimits.min),
+        );
+
+      const getCameraAltitude = () => {
+        if (typeof map.getFreeCameraOptions === "function") {
+          try {
+            const freeCamera = map.getFreeCameraOptions();
+            const position = freeCamera?.position;
+            if (position && Number.isFinite(position[2])) {
+              return position[2];
+            }
+          } catch (error) {
+            if (!freeCameraWarningLogged) {
+              console.warn("Unable to read free camera options", error);
+              freeCameraWarningLogged = true;
+            }
+          }
+        }
+
+        const cameraPosition = map?.transform?._camera?.position;
+        if (cameraPosition && Number.isFinite(cameraPosition[2])) {
+          return cameraPosition[2];
+        }
+
+        return fallbackCameraAltitude;
+      };
+
+      const normalizePosition = (position, altitudeFallback) => {
+        if (Array.isArray(position) && position.length === 3) {
+          return position.map((value, index) => {
+            if (!Number.isFinite(value)) {
+              if (index === 2) {
+                return altitudeFallback;
+              }
+              return 0;
+            }
+            return value;
+          });
+        }
+        return [0, 0, altitudeFallback];
+      };
+
+      const cloneViewState = (state) => ({
+        ...state,
+        position: Array.isArray(state.position)
+          ? [...state.position]
+          : [0, 0, fallbackCameraAltitude],
       });
 
-      map.addControl(deckOverlay);
+      let lastDeckViewState = cloneViewState({
+        longitude: map.getCenter().lng,
+        latitude: map.getCenter().lat,
+        bearing: map.getBearing(),
+        pitch: clampPitch(map.getPitch()),
+        zoom: map.getZoom(),
+        position: [0, 0, getCameraAltitude()],
+        maxPitch: pitchLimits.max,
+        minPitch: pitchLimits.min,
+      });
+
+      const buildViewStateFromMap = () => {
+        const center = map.getCenter();
+        const altitudeCandidate =
+          Array.isArray(lastDeckViewState.position) &&
+          Number.isFinite(lastDeckViewState.position[2])
+            ? lastDeckViewState.position[2]
+            : getCameraAltitude();
+        const altitude = Number.isFinite(altitudeCandidate)
+          ? altitudeCandidate
+          : fallbackCameraAltitude;
+
+        return {
+          longitude: center.lng,
+          latitude: center.lat,
+          bearing: map.getBearing(),
+          pitch: clampPitch(map.getPitch()),
+          zoom: map.getZoom(),
+          position: normalizePosition(lastDeckViewState.position, altitude),
+          maxPitch: pitchLimits.max,
+          minPitch: pitchLimits.min,
+        };
+      };
+
+      const normalizeDeckViewState = (state) => {
+        const normalized = {
+          longitude: state.longitude ?? lastDeckViewState.longitude,
+          latitude: state.latitude ?? lastDeckViewState.latitude,
+          bearing: state.bearing ?? lastDeckViewState.bearing,
+          pitch: clampPitch(state.pitch ?? lastDeckViewState.pitch),
+          zoom: state.zoom ?? lastDeckViewState.zoom,
+          position: normalizePosition(
+            state.position,
+            Number.isFinite(lastDeckViewState.position?.[2])
+              ? lastDeckViewState.position[2]
+              : getCameraAltitude(),
+          ),
+          maxPitch: pitchLimits.max,
+          minPitch: pitchLimits.min,
+        };
+
+        lastDeckViewState = normalized;
+        return cloneViewState(normalized);
+      };
+
+      let syncingFromDeck = false;
+      let syncingFromMap = false;
+
+      const deckInstance = new Deck({
+        parent: deckContainer,
+        views: [new FirstPersonView({ id: firstPersonViewId })],
+        controller: {
+          type: FirstPersonController,
+          dragMode: "rotate",
+          dragPan: true,
+          keyboard: true,
+          scrollZoom: true,
+        },
+        initialViewState: cloneViewState(lastDeckViewState),
+        viewState: cloneViewState(lastDeckViewState),
+        layers: [],
+        getTooltip: ({ object }) => tooltipFormatter(object),
+        onViewStateChange: ({ viewState }) => {
+          const fpState = viewState?.[firstPersonViewId] ?? viewState;
+          if (!fpState || syncingFromMap) {
+            return;
+          }
+
+          const normalizedState = normalizeDeckViewState(fpState);
+
+          syncingFromDeck = true;
+          const targetCenter = [
+            normalizedState.longitude,
+            normalizedState.latitude,
+          ];
+
+          map.jumpTo({
+            center: targetCenter,
+            bearing: normalizedState.bearing,
+            pitch: normalizedState.pitch,
+            zoom: normalizedState.zoom,
+          });
+          syncingFromDeck = false;
+          syncDeckFromMap();
+        },
+      });
+
+      const syncDeckFromMap = () => {
+        if (syncingFromDeck) {
+          return;
+        }
+
+        syncingFromMap = true;
+        const nextState = buildViewStateFromMap();
+        lastDeckViewState = nextState;
+        deckInstance.setProps({ viewState: cloneViewState(nextState) });
+        syncingFromMap = false;
+      };
+
+      const disableMapGestures = () => {
+        map.dragPan.disable();
+        map.dragRotate.disable();
+        map.scrollZoom.disable();
+        map.doubleClickZoom.disable();
+        map.touchZoomRotate.disable();
+        map.keyboard.disable();
+        map.boxZoom.disable();
+      };
+
+      map.on("move", syncDeckFromMap);
 
       const getPmtilesInstance = (() => {
         const cache = new Map();
@@ -177,11 +367,6 @@
       const createTerrainExtensionConfig = (bounds) =>
         terrainExtension ? { ...baseTerrainConfig, bounds } : null;
 
-      const tooltipFormatter = (feature) =>
-        feature
-          ? `Trail: ${feature.properties?.name ?? "Heritage Trail"}`
-          : null;
-
       const trailLayerProps = {
         id: "heritage-trail",
         lineWidthScale: 2,
@@ -205,10 +390,14 @@
           getPointRadius: 12,
           pointRadiusUnits: "pixels",
           terrain: terrainConfig || undefined,
-          beforeId: "watername_ocean",
         });
 
       map.on("load", () => {
+        disableMapGestures();
+        map.getCanvas().style.pointerEvents = "none";
+        deckContainer.style.pointerEvents = "auto";
+        syncDeckFromMap();
+
         map.addSource("terrainSource", {
           type: "raster-dem",
           url: `pmtiles://${pmtilesUrl}`,
@@ -250,7 +439,7 @@
             const geojson = await response.json();
             const terrainConfig = createTerrainExtensionConfig(bounds);
 
-            deckOverlay.setProps({
+            deckInstance.setProps({
               layers: [createTrailLayer(geojson, terrainConfig)],
             });
           } catch (error) {
