@@ -51,7 +51,6 @@
         GeoJsonLayer,
         FirstPersonController,
         FirstPersonView,
-        TerrainLayer,
         COORDINATE_SYSTEM,
         _TerrainExtension,
         TerrainExtension: PublicTerrainExtension,
@@ -347,15 +346,6 @@
           onHover: updateTooltip,
         });
 
-      const createTerrainLayer = (bounds) =>
-        new TerrainLayer({
-          id: "pmtiles-terrain-tiles",
-          ...baseTerrainConfig,
-          bounds,
-          material: { diffuse: 1 },
-          operation: "terrain+draw",
-        });
-
       deckCanvas.addEventListener("mouseleave", () => {
         tooltip.style.display = "none";
       });
@@ -424,12 +414,9 @@
             }
             const geojson = await response.json();
             const terrainConfig = createTerrainExtensionConfig(bounds);
-            const layers = [createTerrainLayer(bounds)];
-
-            layers.push(createTrailLayer(geojson, terrainConfig));
 
             deckgl.setProps({
-              layers,
+              layers: [createTrailLayer(geojson, terrainConfig)],
             });
             deckReady = true;
             syncDeckViewState();
