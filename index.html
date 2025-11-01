@@ -38,8 +38,6 @@
     <script>
       const {
         GeoJsonLayer,
-        FirstPersonController,
-        FirstPersonView,
         COORDINATE_SYSTEM,
         _TerrainExtension,
         TerrainExtension: PublicTerrainExtension,
@@ -74,23 +72,8 @@
         ? new TerrainExtension({ terrainDrawMode: "offset" })
         : null;
 
-      const FIRST_PERSON_VIEW_ID = "firstPersonView";
-
       const deckOverlay = new MapboxOverlay({
         interleaved: true,
-        views: [
-          new FirstPersonView({
-            id: FIRST_PERSON_VIEW_ID,
-            fovy: 50,
-            controller: {
-              type: FirstPersonController,
-              dragMode: "rotate",
-              dragPan: true,
-              keyboard: true,
-              scrollZoom: true,
-            },
-          }),
-        ],
         layers: [],
         getTooltip: ({ object }) => tooltipFormatter(object),
       });
@@ -222,83 +205,8 @@
           getPointRadius: 12,
           pointRadiusUnits: "pixels",
           terrain: terrainConfig || undefined,
+          beforeId: "watername_ocean",
         });
-
-      const mapViewState = () => ({
-        longitude: map.getCenter().lng,
-        latitude: map.getCenter().lat,
-        zoom: map.getZoom(),
-        pitch: map.getPitch(),
-        bearing: map.getBearing(),
-      });
-
-      const approximateCameraAltitude = () => {
-        if (typeof map.getFreeCameraOptions === "function") {
-          const freeCamera = map.getFreeCameraOptions();
-          if (freeCamera?.position && Number.isFinite(freeCamera.position[2])) {
-            return freeCamera.position[2];
-          }
-        }
-        const pitchRadians = (map.getPitch() * Math.PI) / 180;
-        const metersPerPixel =
-          (40075016.68557849 *
-            Math.abs(Math.cos((map.getCenter().lat * Math.PI) / 180))) /
-          Math.pow(2, map.getZoom() + 8);
-        const altitude =
-          metersPerPixel * window.innerHeight * Math.sin(pitchRadians);
-        return Number.isFinite(altitude) && altitude > 0 ? altitude + 15 : 60;
-      };
-
-      const currentFirstPersonViewState = () => ({
-        ...mapViewState(),
-        position: [0, 0, approximateCameraAltitude()],
-        maxPitch: 85,
-      });
-
-      const updateDeckViewStateFromMap = () => {
-        deckOverlay.setProps({
-          viewState: {
-            [FIRST_PERSON_VIEW_ID]: currentFirstPersonViewState(),
-          },
-        });
-      };
-
-      updateDeckViewStateFromMap();
-
-      let suppressMapSync = false;
-
-      const normalizeDeckViewState = (viewState) => {
-        if (!viewState) {
-          return null;
-        }
-        if (FIRST_PERSON_VIEW_ID in viewState) {
-          return viewState[FIRST_PERSON_VIEW_ID];
-        }
-        return viewState;
-      };
-
-      deckOverlay.setProps({
-        onViewStateChange: ({ viewState }) => {
-          const firstPersonViewState = normalizeDeckViewState(viewState);
-          if (!firstPersonViewState || suppressMapSync) {
-            return;
-          }
-          suppressMapSync = true;
-          map.jumpTo({
-            center: [
-              firstPersonViewState.longitude,
-              firstPersonViewState.latitude,
-            ],
-            zoom: firstPersonViewState.zoom,
-            pitch: firstPersonViewState.pitch,
-            bearing: firstPersonViewState.bearing,
-          });
-          map.once("moveend", () => {
-            suppressMapSync = false;
-            updateDeckViewStateFromMap();
-          });
-        },
-      });
 
       map.on("load", () => {
         map.addSource("terrainSource", {
@@ -345,7 +253,6 @@
             deckOverlay.setProps({
               layers: [createTrailLayer(geojson, terrainConfig)],
             });
-            updateDeckViewStateFromMap();
           } catch (error) {
             console.error(
               "Unable to initialize the heritage trail layer",
@@ -364,22 +271,6 @@
           showCompass: true,
         }),
       );
-
-      map.on("move", () => {
-        if (suppressMapSync) {
-          return;
-        }
-        updateDeckViewStateFromMap();
-      });
-
-      map.on("load", () => {
-        map.scrollZoom.disable();
-        map.dragPan.disable();
-        map.dragRotate.disable();
-        map.keyboard.disable();
-        map.touchZoomRotate.disableRotation();
-        updateDeckViewStateFromMap();
-      });
     </script>
   </body>
 </html>
