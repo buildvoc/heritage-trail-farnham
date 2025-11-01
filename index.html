@@ -76,6 +76,7 @@
       deckCanvas.style.width = "100%";
       deckCanvas.style.height = "100%";
       deckCanvas.style.pointerEvents = "auto";
+      deckCanvas.style.backgroundColor = "transparent";
       mapContainer.appendChild(deckCanvas);
 
       const tooltip = document.createElement("div");
@@ -90,6 +91,12 @@
         canvas: deckCanvas,
         width: "100%",
         height: "100%",
+        glOptions: {
+          alpha: true,
+        },
+        parameters: {
+          clearColor: [0, 0, 0, 0],
+        },
         controller: {
           type: deck.OrbitController,
           dragMode: "pan",
