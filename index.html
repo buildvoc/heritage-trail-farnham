@@ -27,30 +27,16 @@
         bottom: 0;
         width: 100%;
       }
-
-      #deck-tooltip {
-        position: absolute;
-        z-index: 2;
-        pointer-events: none;
-        background: rgba(0, 0, 0, 0.75);
-        color: #ffffff;
-        padding: 4px 8px;
-        border-radius: 4px;
-        font-size: 12px;
-        white-space: nowrap;
-        transform: translate(-50%, calc(-100% - 8px));
-        display: none;
-      }
     </style>
   </head>
   <body>
     <div id="map"></div>
     <script>
       const {
-        Deck,
         GeoJsonLayer,
         FirstPersonController,
         FirstPersonView,
+        MapboxOverlay,
         COORDINATE_SYSTEM,
         _TerrainExtension,
         TerrainExtension: PublicTerrainExtension,
@@ -76,28 +62,6 @@
         maxZoom: 20,
       });
 
-      const mapContainer = document.getElementById("map");
-
-      const deckCanvas = document.createElement("canvas");
-      deckCanvas.id = "deck-canvas";
-      deckCanvas.style.position = "absolute";
-      deckCanvas.style.top = "0";
-      deckCanvas.style.left = "0";
-      deckCanvas.style.width = "100%";
-      deckCanvas.style.height = "100%";
-      deckCanvas.style.pointerEvents = "auto";
-      deckCanvas.style.backgroundColor = "transparent";
-      deckCanvas.style.zIndex = "1";
-      mapContainer.appendChild(deckCanvas);
-
-      const tooltip = document.createElement("div");
-      tooltip.id = "deck-tooltip";
-      mapContainer.appendChild(tooltip);
-
-      let deckReady = false;
-      let deckSyncInProgress = false;
-      let mapSyncInProgress = false;
-
       /*
        * https://deck.gl/docs/api-reference/extensions/terrain-extension
        */
@@ -106,54 +70,26 @@
         ? new TerrainExtension({ terrainDrawMode: "offset" })
         : null;
 
-      const deckgl = new Deck({
-        canvas: deckCanvas,
-        width: "100%",
-        height: "100%",
-        glOptions: {
-          alpha: true,
-        },
-        parameters: {
-          clearColor: [0, 0, 0, 0],
-        },
-        onViewStateChange: ({ viewState }) => {
-          if (!deckReady || mapSyncInProgress) {
-            return;
-          }
-
-          if (
-            !Number.isFinite(viewState.longitude) ||
-            !Number.isFinite(viewState.latitude)
-          ) {
-            return;
-          }
-
-          deckSyncInProgress = true;
-          try {
-            map.jumpTo({
-              center: [viewState.longitude, viewState.latitude],
-              zoom: viewState.zoom,
-              pitch: viewState.pitch,
-              bearing: viewState.bearing,
-            });
-          } finally {
-            deckSyncInProgress = false;
-          }
+      const deckOverlay = new MapboxOverlay({
+        interleaved: true,
+        controller: {
+          type: FirstPersonController,
+          dragMode: "rotate",
+          dragPan: true,
+          keyboard: true,
+          scrollZoom: true,
         },
         views: [
           new FirstPersonView({
             id: "firstPersonView",
-            controller: {
-              type: FirstPersonController,
-              dragMode: "rotate",
-              dragPan: true,
-              keyboard: true,
-              scrollZoom: true,
-            },
             fovy: 50,
           }),
         ],
         layers: [],
+        getTooltip: ({ object }) =>
+          object
+            ? `Trail: ${object.properties?.name ?? "Heritage Trail"}`
+            : null,
       });
 
       const getPmtilesInstance = (() => {
@@ -261,77 +197,10 @@
         getLineWidth: 6,
         pickable: true,
         highlightColor: [255, 255, 0, 180],
-        parameters: {
-          depthTest: false,
-        },
         coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
         extensions: terrainExtension ? [terrainExtension] : [],
         terrainDrawMode: "offset",
         getElevation: (feature) => (feature.geometry.type === "Point" ? 12 : 6),
-      };
-
-      const getCameraAltitude = (centerCoordinate) => {
-        if (typeof map.getFreeCameraOptions === "function") {
-          const freeCamera = map.getFreeCameraOptions();
-          if (freeCamera?.position) {
-            const altitudeUnits =
-              freeCamera.position.z - (centerCoordinate.z ?? 0);
-            const unitsPerMeter =
-              centerCoordinate.meterInMercatorCoordinateUnits();
-
-            if (Number.isFinite(unitsPerMeter) && unitsPerMeter !== 0) {
-              return altitudeUnits / unitsPerMeter;
-            }
-          }
-        }
-
-        return 50;
-      };
-
-      const currentFirstPersonViewState = () => {
-        const center = map.getCenter();
-        const centerCoordinate = maplibregl.MercatorCoordinate.fromLngLat(
-          { lng: center.lng, lat: center.lat },
-          0,
-        );
-
-        return {
-          longitude: center.lng,
-          latitude: center.lat,
-          zoom: map.getZoom(),
-          pitch: map.getPitch(),
-          bearing: map.getBearing(),
-          position: [0, 0, getCameraAltitude(centerCoordinate)],
-          maxPitch: map.getMaxPitch(),
-          minPitch: map.getMinPitch ? map.getMinPitch() : undefined,
-        };
-      };
-
-      const syncDeckViewState = () => {
-        if (deckSyncInProgress) {
-          return;
-        }
-
-        mapSyncInProgress = true;
-        try {
-          deckgl.setProps({
-            viewState: currentFirstPersonViewState(),
-          });
-        } finally {
-          mapSyncInProgress = false;
-        }
-      };
-
-      const updateTooltip = (info) => {
-        if (info.object) {
-          const name = info.object.properties?.name;
-          tooltip.textContent = name ? `Trail: ${name}` : "Heritage Trail";
-          tooltip.style.display = "block";
-          tooltip.style.left = `${info.x}px`;
-          tooltip.style.top = `${info.y}px`;
-        } else {
-          tooltip.style.display = "none";
-        }
       };
 
       const createTrailLayer = (data, terrainConfig) =>
@@ -340,40 +209,12 @@
           data,
           autoHighlight: true,
           pointType: "circle",
-          getPointRadius: 30,
-          pointRadiusUnits: "meters",
+          getPointRadius: 12,
+          pointRadiusUnits: "pixels",
           terrain: terrainConfig || undefined,
-          onHover: updateTooltip,
         });
 
-      deckCanvas.addEventListener("mouseleave", () => {
-        tooltip.style.display = "none";
-      });
-
-      const disableInteraction = (interaction) => {
-        if (interaction && typeof interaction.disable === "function") {
-          interaction.disable();
-        }
-      };
-
-      const disableMapUserInteractions = () => {
-        disableInteraction(map.dragPan);
-        disableInteraction(map.dragRotate);
-        disableInteraction(map.scrollZoom);
-        disableInteraction(map.boxZoom);
-        disableInteraction(map.doubleClickZoom);
-        disableInteraction(map.touchZoomRotate);
-        disableInteraction(map.keyboard);
-      };
-
       map.on("load", () => {
-        const mapCanvas = map.getCanvas();
-        if (mapCanvas) {
-          mapCanvas.style.pointerEvents = "none";
-        }
-
-        disableMapUserInteractions();
-
         map.addSource("terrainSource", {
           type: "raster-dem",
           url: `pmtiles://${pmtilesUrl}`,
@@ -415,11 +256,9 @@
             const geojson = await response.json();
             const terrainConfig = createTerrainExtensionConfig(bounds);
 
-            deckgl.setProps({
+            deckOverlay.setProps({
               layers: [createTrailLayer(geojson, terrainConfig)],
             });
-            deckReady = true;
-            syncDeckViewState();
           } catch (error) {
             console.error(
               "Unable to initialize the heritage trail layer",
@@ -428,24 +267,7 @@
           }
         };
 
-        syncDeckViewState();
         void initializeTrailLayer();
-      });
-
-      map.on("render", () => {
-        if (!deckReady) {
-          return;
-        }
-
-        syncDeckViewState();
-      });
-
-      map.on("resize", () => {
-        deckgl.resize();
-      });
-
-      map.on("remove", () => {
-        deckgl.finalize();
       });
 
       map.addControl(
@@ -455,6 +277,8 @@
           showCompass: true,
         }),
       );
+
+      map.addControl(deckOverlay);
     </script>
   </body>
 </html>
