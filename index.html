@@ -87,6 +87,11 @@
       let deckSyncInProgress = false;
       let mapSyncInProgress = false;
 
+      const TerrainExtension = deck._TerrainExtension || deck.TerrainExtension;
+      const terrainExtension = TerrainExtension
+        ? new TerrainExtension({ terrainDrawMode: "offset" })
+        : null;
+
       const deckgl = new deck.Deck({
         canvas: deckCanvas,
         width: "100%",
@@ -138,6 +143,105 @@
         layers: [],
       });
 
+      const getPmtilesInstance = (() => {
+        const cache = new Map();
+        return (archivePath) => {
+          if (cache.has(archivePath)) {
+            return cache.get(archivePath);
+          }
+          const instance =
+            protocol.get(archivePath) ?? new pmtiles.PMTiles(archivePath);
+          protocol.add(instance);
+          cache.set(archivePath, instance);
+          return instance;
+        };
+      })();
+
+      const pmtilesImageResponse = (tile) => {
+        if (!tile || !tile.data) {
+          return new Response(null, { status: 204 });
+        }
+
+        const dataView =
+          tile.data instanceof ArrayBuffer
+            ? tile.data
+            : tile.data.buffer.slice(
+                tile.data.byteOffset,
+                tile.data.byteOffset + tile.data.byteLength,
+              );
+
+        const headers = new Headers({ "Content-Type": "image/png" });
+        if (tile.cacheControl) {
+          headers.set("Cache-Control", tile.cacheControl);
+        }
+        if (tile.expires) {
+          headers.set("Expires", tile.expires);
+        }
+
+        return new Response(dataView, { status: 200, headers });
+      };
+
+      const pmtilesFetch = async (url, options = {}) => {
+        if (!url.startsWith("pmtiles://")) {
+          return fetch(url, options);
+        }
+
+        const matches = url.match(/^pmtiles:\/\/(.+?)\/(\d+)\/(\d+)\/(\d+)$/);
+        if (!matches) {
+          throw new Error(`Unexpected PMTiles request: ${url}`);
+        }
+
+        const [, archivePath, z, x, y] = matches;
+        const archive = getPmtilesInstance(archivePath);
+        const tile = await archive.getZxy(
+          Number.parseInt(z, 10),
+          Number.parseInt(x, 10),
+          Number.parseInt(y, 10),
+          options.signal,
+        );
+
+        return pmtilesImageResponse(tile);
+      };
+
+      const createTerrainLayer = () => {
+        if (typeof deck.TerrainLayer !== "function") {
+          console.warn(
+            "Deck TerrainLayer is unavailable in the current build.",
+          );
+          return null;
+        }
+
+        return new deck.TerrainLayer({
+          id: "pmtiles-terrain",
+          elevationData: `pmtiles://${pmtilesUrl}/{z}/{x}/{y}`,
+          texture: null,
+          meshMaxError: 3,
+          elevationDecoder: {
+            rScaler: 6553.6,
+            gScaler: 25.6,
+            bScaler: 0.1,
+            offset: -10000,
+          },
+          minZoom: 5,
+          maxZoom: 15,
+          refinementStrategy: "no-overlap",
+          operation: "terrain",
+          fetch: pmtilesFetch,
+          loadOptions: {
+            terrain: {
+              skirtHeight: 15,
+            },
+          },
+        });
+      };
+
+      const terrainLayer = createTerrainLayer();
+
+      const baseDeckLayers = terrainLayer ? [terrainLayer] : [];
+      if (baseDeckLayers.length > 0) {
+        deckgl.setProps({ layers: baseDeckLayers });
+      }
+
       const trailLayerProps = {
         id: "heritage-trail",
         lineWidthScale: 2,
@@ -150,6 +254,9 @@
           depthTest: false,
         },
         coordinateSystem: deck.COORDINATE_SYSTEM.CARTESIAN,
+        extensions: terrainExtension ? [terrainExtension] : [],
+        terrainDrawMode: "offset",
+        getElevation: (feature) => (feature.geometry.type === "Point" ? 12 : 6),
       };
 
       const currentOrbitViewState = () => {
@@ -231,6 +338,9 @@
           ...trailLayerProps,
           data,
           autoHighlight: true,
+          pointType: "circle",
+          getPointRadius: 30,
+          pointRadiusUnits: "meters",
           onHover: updateTooltip,
         });
 
@@ -278,7 +388,7 @@
             const mercatorGeojson = convertFeatureCollectionToMercator(geojson);
 
             deckgl.setProps({
-              layers: [createTrailLayer(mercatorGeojson)],
+              layers: [...baseDeckLayers, createTrailLayer(mercatorGeojson)],
             });
             deckReady = true;
             syncDeckViewState();
