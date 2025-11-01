@@ -175,23 +175,77 @@
         return null;
       };
 
+      const looksLikeTokenString = (value) => {
+        if (typeof value !== "string") {
+          return false;
+        }
+        const trimmed = value.trim();
+        if (!trimmed) {
+          return false;
+        }
+        if (/^[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+$/.test(trimmed)) {
+          return true;
+        }
+        return trimmed.length >= 16;
+      };
+
       const parseTokenFromResponse = (payload) => {
         if (!payload) {
           return null;
         }
+
         if (typeof payload === "string") {
-          return payload;
+          return looksLikeTokenString(payload) ? payload.trim() : null;
         }
-        if (typeof payload.token === "string") {
-          return payload.token;
+
+        if (Array.isArray(payload)) {
+          for (const item of payload) {
+            const candidate = parseTokenFromResponse(item);
+            if (candidate) {
+              return candidate;
+            }
+          }
+          return null;
         }
-        if (typeof payload.access_token === "string") {
-          return payload.access_token;
+
+        if (typeof payload !== "object") {
+          return null;
         }
-        if (payload.data) {
-          return parseTokenFromResponse(payload.data);
+
+        for (const [key, value] of Object.entries(payload)) {
+          if (typeof value === "string") {
+            if (
+              /token|bearer|jwt|access/i.test(key) &&
+              looksLikeTokenString(value)
+            ) {
+              return value.trim();
+            }
+          }
         }
+
+        for (const value of Object.values(payload)) {
+          const candidate = parseTokenFromResponse(value);
+          if (candidate) {
+            return candidate;
+          }
+        }
+
         return null;
+      };
+
+      const parseResponsePayload = (rawBody) => {
+        if (typeof rawBody !== "string") {
+          return null;
+        }
+        const trimmed = rawBody.trim();
+        if (!trimmed) {
+          return null;
+        }
+        try {
+          return JSON.parse(trimmed);
+        } catch (error) {
+          return trimmed;
+        }
       };
 
       const resolveTokenExpiry = (payload) => {
@@ -234,7 +288,8 @@
           );
         }
 
-        const payload = await response.json().catch(() => null);
+        const rawBody = await response.text();
+        const payload = parseResponsePayload(rawBody);
         const token = parseTokenFromResponse(payload);
         if (!token) {
           resetPic2bimAuth();
