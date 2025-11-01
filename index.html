@@ -116,11 +116,6 @@
         parameters: {
           clearColor: [0, 0, 0, 0],
         },
-        controller: {
-          type: FirstPersonController,
-          dragMode: "pan",
-          keyboard: false,
-        },
         onViewStateChange: ({ viewState }) => {
           if (!deckReady || mapSyncInProgress) {
             return;
@@ -147,7 +142,10 @@
         },
         views: [
           new FirstPersonView({
-            id: "first-person-view",
+            id: "firstPersonView",
+            controller: {
+              type: FirstPersonController,
+            },
             fovy: 50,
           }),
         ],
