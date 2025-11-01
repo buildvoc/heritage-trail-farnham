@@ -140,6 +140,8 @@
         Deck,
         FirstPersonController,
         FirstPersonView,
+        MapController,
+        MapView,
         PolygonLayer,
         COORDINATE_SYSTEM,
         _TerrainExtension,
@@ -268,10 +270,11 @@
         });
 
         if (Number.isFinite(altitude)) {
-          lastDeckViewState.position = normalizePosition(
-            [0, 0, altitude],
-            altitude,
-          );
+          const current = cloneViewStateForMode("firstPerson") ?? {};
+          setViewStateForMode("firstPerson", {
+            ...current,
+            position: [0, 0, altitude],
+          });
         }
 
         syncDeckFromMap();
@@ -319,11 +322,20 @@
           if (typeof fetchNearestBuilding !== "function") {
             throw new Error("Building fetch helpers are unavailable.");
           }
-          const state = cloneViewState(lastDeckViewState);
+          const state =
+            cloneViewStateForMode(currentViewMode) ??
+            cloneViewStateForMode("firstPerson");
+          const fallbackCenter = map.getCenter();
           const result = await fetchNearestBuilding({
-            latitude: state.latitude,
-            longitude: state.longitude,
-            bearing: state.bearing,
+            latitude: Number.isFinite(state?.latitude)
+              ? state.latitude
+              : fallbackCenter.lat,
+            longitude: Number.isFinite(state?.longitude)
+              ? state.longitude
+              : fallbackCenter.lng,
+            bearing: Number.isFinite(state?.bearing)
+              ? state.bearing
+              : map.getBearing(),
           });
 
           if (!result) {
@@ -478,7 +490,11 @@
         return null;
       };
 
-      const firstPersonViewId = "first-person-view";
+      const viewModeIds = {
+        firstPerson: "first-person-view",
+        map: "map-view",
+        orthographic: "orthographic-view",
+      };
       const pitchLimits = { min: 0, max: 85 };
       const fallbackCameraAltitude = 120;
       let freeCameraWarningLogged = false;
@@ -528,47 +544,144 @@
         return [0, 0, altitudeFallback];
       };
 
-      const cloneViewState = (state) => ({
-        longitude: state.longitude,
-        latitude: state.latitude,
-        bearing: state.bearing,
-        pitch: state.pitch,
-        zoom: state.zoom,
-        position: Array.isArray(state.position)
-          ? [...state.position]
-          : [0, 0, fallbackCameraAltitude],
-      });
+      const getMapDerivedBaseState = () => {
+        const center = map.getCenter();
+        return {
+          longitude: center.lng,
+          latitude: center.lat,
+          bearing: map.getBearing(),
+          pitch: clampPitch(map.getPitch()),
+          zoom: map.getZoom(),
+        };
+      };
 
-      const wrapViewState = (state) => ({
-        [firstPersonViewId]: cloneViewState(state),
-      });
+      const createInitialViewStates = () => {
+        const base = getMapDerivedBaseState();
+        const altitude = getCameraAltitude();
+        return {
+          firstPerson: {
+            ...base,
+            position: normalizePosition([0, 0, altitude], altitude),
+          },
+          map: { ...base },
+          orthographic: { ...base, pitch: 0 },
+        };
+      };
 
-      let lastDeckViewState = cloneViewState({
-        longitude: map.getCenter().lng,
-        latitude: map.getCenter().lat,
-        bearing: map.getBearing(),
-        pitch: clampPitch(map.getPitch()),
-        zoom: map.getZoom(),
-        position: [0, 0, getCameraAltitude()],
-      });
+      const viewIdToMode = Object.entries(viewModeIds).reduce(
+        (mapping, [mode, id]) => Object.assign(mapping, { [id]: mode }),
+        {},
+      );
 
-      let insetUserInteracting = false;
-      let insetProgrammaticUpdate = false;
+      const cloneViewStateForMode = (mode) => {
+        const existing = viewStateStore[mode];
+        if (!existing) {
+          return null;
+        }
+
+        const fallback = getMapDerivedBaseState();
+        const state = {
+          longitude: Number.isFinite(existing.longitude)
+            ? existing.longitude
+            : fallback.longitude,
+          latitude: Number.isFinite(existing.latitude)
+            ? existing.latitude
+            : fallback.latitude,
+          bearing: Number.isFinite(existing.bearing)
+            ? existing.bearing
+            : fallback.bearing,
+          pitch: clampPitch(
+            Number.isFinite(existing.pitch) ? existing.pitch : fallback.pitch,
+          ),
+          zoom: Number.isFinite(existing.zoom) ? existing.zoom : fallback.zoom,
+        };
+
+        if (mode === "firstPerson") {
+          const altitudeFallback = Number.isFinite(existing.position?.[2])
+            ? existing.position[2]
+            : getCameraAltitude();
+          state.position = normalizePosition(
+            existing.position,
+            altitudeFallback,
+          );
+        } else if (Array.isArray(existing.position)) {
+          state.position = [...existing.position];
+        }
+
+        return state;
+      };
+
+      const wrapViewStateForMode = (mode) => {
+        const viewId = viewModeIds[mode] ?? viewModeIds.firstPerson;
+        const state = cloneViewStateForMode(mode);
+        return state ? { [viewId]: state } : {};
+      };
+
+      const setViewStateForMode = (mode, nextState) => {
+        const previous =
+          cloneViewStateForMode(mode) ?? getMapDerivedBaseState();
+        const normalized = {
+          longitude: Number.isFinite(nextState?.longitude)
+            ? nextState.longitude
+            : previous.longitude,
+          latitude: Number.isFinite(nextState?.latitude)
+            ? nextState.latitude
+            : previous.latitude,
+          bearing: Number.isFinite(nextState?.bearing)
+            ? nextState.bearing
+            : previous.bearing,
+          pitch: clampPitch(
+            Number.isFinite(nextState?.pitch)
+              ? nextState.pitch
+              : previous.pitch,
+          ),
+          zoom: Number.isFinite(nextState?.zoom)
+            ? nextState.zoom
+            : previous.zoom,
+        };
+
+        if (mode === "firstPerson") {
+          const altitudeFallback = Number.isFinite(nextState?.position?.[2])
+            ? nextState.position[2]
+            : Number.isFinite(previous?.position?.[2])
+              ? previous.position[2]
+              : getCameraAltitude();
+          normalized.position = normalizePosition(
+            nextState?.position ?? previous?.position,
+            altitudeFallback,
+          );
+        } else if (Array.isArray(nextState?.position)) {
+          normalized.position = [...nextState.position];
+        }
+
+        viewStateStore[mode] = normalized;
+        return normalized;
+      };
 
       const syncInsetViewFromDeck = () => {
         if (!mapInset || insetUserInteracting) {
           return;
         }
 
-        const targetZoom = Math.max(lastDeckViewState.zoom - 1, 12);
+        const activeState = cloneViewStateForMode(currentViewMode);
+        if (!activeState) {
+          return;
+        }
+
+        const targetZoom = Math.max(activeState.zoom - 1, 12);
         insetProgrammaticUpdate = true;
         mapInset.jumpTo({
-          center: [lastDeckViewState.longitude, lastDeckViewState.latitude],
+          center: [activeState.longitude, activeState.latitude],
           zoom: targetZoom,
-          bearing: lastDeckViewState.bearing,
+          bearing: activeState.bearing,
           pitch: 45,
         });
       };
+
+      let viewStateStore = createInitialViewStates();
+      let currentViewMode = "firstPerson";
+      let insetUserInteracting = false;
+      let insetProgrammaticUpdate = false;
 
       if (mapInset) {
         mapInset.on("movestart", () => {
@@ -582,44 +695,78 @@
         });
       }
 
-      const buildViewStateFromMap = () => {
-        const center = map.getCenter();
-        const altitudeCandidate =
-          Array.isArray(lastDeckViewState.position) &&
-          Number.isFinite(lastDeckViewState.position[2])
-            ? lastDeckViewState.position[2]
-            : getCameraAltitude();
-        const altitude = Number.isFinite(altitudeCandidate)
-          ? altitudeCandidate
-          : fallbackCameraAltitude;
+      const updateViewStatesFromMap = () => {
+        const base = getMapDerivedBaseState();
+        const altitude = getCameraAltitude();
 
-        return {
-          longitude: center.lng,
-          latitude: center.lat,
-          bearing: map.getBearing(),
-          pitch: clampPitch(map.getPitch()),
-          zoom: map.getZoom(),
-          position: normalizePosition(lastDeckViewState.position, altitude),
+        const previousFirstPerson = cloneViewStateForMode("firstPerson") ?? {
+          position: [0, 0, altitude],
+        };
+
+        viewStateStore = {
+          firstPerson: {
+            ...base,
+            position: normalizePosition(
+              previousFirstPerson.position,
+              Number.isFinite(previousFirstPerson.position?.[2])
+                ? previousFirstPerson.position[2]
+                : altitude,
+            ),
+          },
+          map: {
+            ...viewStateStore.map,
+            ...base,
+          },
+          orthographic: {
+            ...viewStateStore.orthographic,
+            ...base,
+            pitch: 0,
+          },
         };
       };
 
-      const normalizeDeckViewState = (state) => {
-        const normalized = {
-          longitude: state.longitude ?? lastDeckViewState.longitude,
-          latitude: state.latitude ?? lastDeckViewState.latitude,
-          bearing: state.bearing ?? lastDeckViewState.bearing,
-          pitch: clampPitch(state.pitch ?? lastDeckViewState.pitch),
-          zoom: state.zoom ?? lastDeckViewState.zoom,
-          position: normalizePosition(
-            state.position,
-            Number.isFinite(lastDeckViewState.position?.[2])
-              ? lastDeckViewState.position[2]
-              : getCameraAltitude(),
-          ),
-        };
+      const viewControllers = {
+        firstPerson: {
+          type: FirstPersonController,
+          dragMode: "rotate",
+          dragPan: true,
+          keyboard: true,
+          scrollZoom: true,
+        },
+        map: {
+          type: MapController,
+          dragPan: true,
+          dragRotate: true,
+          scrollZoom: true,
+          keyboard: true,
+        },
+        orthographic: {
+          type: MapController,
+          dragPan: true,
+          dragRotate: true,
+          scrollZoom: true,
+          keyboard: true,
+        },
+      };
 
-        lastDeckViewState = normalized;
-        return cloneViewState(normalized);
+      const createViewForMode = (mode) => {
+        if (mode === "map") {
+          return new MapView({
+            id: viewModeIds.map,
+            controller: viewControllers.map,
+          });
+        }
+        if (mode === "orthographic") {
+          return new MapView({
+            id: viewModeIds.orthographic,
+            controller: viewControllers.orthographic,
+            orthographic: true,
+          });
+        }
+        return new FirstPersonView({
+          id: viewModeIds.firstPerson,
+          controller: viewControllers.firstPerson,
+        });
       };
 
       let syncingFromDeck = false;
@@ -645,42 +792,27 @@
 
       deckInstance = new Deck({
         parent: deckContainer,
-        views: [
-          new FirstPersonView({
-            id: firstPersonViewId,
-            controller: {
-              type: FirstPersonController,
-              dragMode: "rotate",
-              dragPan: true,
-              keyboard: true,
-              scrollZoom: true,
-            },
-          }),
-        ],
-        initialViewState: wrapViewState(lastDeckViewState),
-        viewState: wrapViewState(lastDeckViewState),
+        views: [createViewForMode(currentViewMode)],
+        initialViewState: wrapViewStateForMode(currentViewMode),
+        viewState: wrapViewStateForMode(currentViewMode),
         layers: [],
         getTooltip: (info) => tooltipFormatter(info),
         onViewStateChange: ({ viewState, viewId }) => {
-          if (syncingFromMap || viewId !== firstPersonViewId) {
+          const mode = viewIdToMode[viewId] ?? currentViewMode;
+          if (syncingFromMap || mode !== currentViewMode) {
             return;
           }
 
-          const fpState = viewState?.[viewId] ?? viewState;
-          if (!fpState) {
+          const nextState = viewState?.[viewId] ?? viewState;
+          if (!nextState) {
             return;
           }
 
-          const normalizedState = normalizeDeckViewState(fpState);
+          const normalizedState = setViewStateForMode(mode, nextState);
 
           syncingFromDeck = true;
-          const targetCenter = [
-            normalizedState.longitude,
-            normalizedState.latitude,
-          ];
-
           map.jumpTo({
-            center: targetCenter,
+            center: [normalizedState.longitude, normalizedState.latitude],
             bearing: normalizedState.bearing,
             pitch: normalizedState.pitch,
             zoom: normalizedState.zoom,
@@ -690,20 +822,65 @@
         },
       });
 
-      syncInsetViewFromDeck();
-
       const syncDeckFromMap = () => {
         if (syncingFromDeck) {
           return;
         }
 
         syncingFromMap = true;
-        const nextState = buildViewStateFromMap();
-        lastDeckViewState = cloneViewState(nextState);
-        deckInstance.setProps({ viewState: wrapViewState(lastDeckViewState) });
+        updateViewStatesFromMap();
+        deckInstance.setProps({
+          viewState: wrapViewStateForMode(currentViewMode),
+        });
         syncInsetViewFromDeck();
         syncingFromMap = false;
       };
+
+      const setViewMode = (mode) => {
+        if (!viewModeIds[mode] || mode === currentViewMode) {
+          return;
+        }
+
+        currentViewMode = mode;
+        updateViewStatesFromMap();
+        deckInstance.setProps({
+          views: [createViewForMode(mode)],
+          viewState: wrapViewStateForMode(mode),
+        });
+        syncInsetViewFromDeck();
+      };
+
+      const handleViewShortcut = (event) => {
+        const key = event.key?.toUpperCase();
+        if (!key) {
+          return;
+        }
+
+        const target = event.target;
+        if (
+          target &&
+          (target.tagName === "INPUT" ||
+            target.tagName === "TEXTAREA" ||
+            target.isContentEditable)
+        ) {
+          return;
+        }
+
+        if (key === "T") {
+          event.preventDefault();
+          setViewMode("orthographic");
+        } else if (key === "P") {
+          event.preventDefault();
+          setViewMode("map");
+        } else if (key === "D") {
+          event.preventDefault();
+          setViewMode("firstPerson");
+        }
+      };
+
+      window.addEventListener("keydown", handleViewShortcut);
+
+      syncInsetViewFromDeck();
 
       const disableMapGestures = () => {
         map.dragPan.disable();
