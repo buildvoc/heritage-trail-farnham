@@ -16,8 +16,10 @@
     <script src="https://unpkg.com/pmtiles@4.1.0/dist/pmtiles.js"></script>
     <script src="https://unpkg.com/deck.gl@9.0.37/dist.min.js"></script>
     <!--
-      The credentials script must define window.pic2bimCredentials with
-      { username: "...", password: "..." } and should never be committed.
+      Copy pic2bim-credentials.sample.js to pic2bim-credentials.local.js and
+      update it to define window.pic2bimCredentials with
+      { username: "...", password: "..." }. The local file should never be
+      committed.
     -->
     <script src="pic2bim-credentials.local.js" defer></script>
     <style>
