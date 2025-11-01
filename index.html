@@ -46,6 +46,17 @@
   <body>
     <div id="map"></div>
     <script>
+      const {
+        Deck,
+        GeoJsonLayer,
+        OrbitController,
+        OrbitView,
+        TerrainLayer,
+        COORDINATE_SYSTEM,
+        _TerrainExtension,
+        TerrainExtension: PublicTerrainExtension,
+      } = deck;
+
       const protocol = new pmtiles.Protocol();
       maplibregl.addProtocol("pmtiles", protocol.tile);
       const pmtilesUrl = "output.pmtiles";
@@ -87,12 +98,15 @@
       let deckSyncInProgress = false;
       let mapSyncInProgress = false;
 
-      const TerrainExtension = deck._TerrainExtension || deck.TerrainExtension;
+      /*
+       * https://deck.gl/docs/api-reference/extensions/terrain-extension
+       */
+      const TerrainExtension = PublicTerrainExtension || _TerrainExtension;
       const terrainExtension = TerrainExtension
         ? new TerrainExtension({ terrainDrawMode: "offset" })
         : null;
 
-      const deckgl = new deck.Deck({
+      const deckgl = new Deck({
         canvas: deckCanvas,
         width: "100%",
         height: "100%",
@@ -103,7 +117,7 @@
           clearColor: [0, 0, 0, 0],
         },
         controller: {
-          type: deck.OrbitController,
+          type: OrbitController,
           dragMode: "pan",
           keyboard: false,
         },
@@ -135,7 +149,7 @@
           }
         },
         views: [
-          new deck.OrbitView({
+          new OrbitView({
             id: "orbit-view",
             fov: 50,
           }),
@@ -203,23 +217,42 @@
         return pmtilesImageResponse(tile);
       };
 
-      const terrainConfig = terrainExtension
-        ? {
-            elevationData: `pmtiles://${pmtilesUrl}/{z}/{x}/{y}`,
-            texture: null,
-            elevationDecoder: {
-              rScaler: 6553.6,
-              gScaler: 25.6,
-              bScaler: 0.1,
-              offset: -10000,
-            },
-            bounds: [-180, -85.05113, 180, 85.05113],
-            fetch: pmtilesFetch,
-            minZoom: 5,
-            maxZoom: 15,
-            skirtHeight: 15,
+      const defaultTerrainBounds = [-180, -85.05113, 180, 85.05113];
+      const terrainDecoder = {
+        rScaler: 6553.6,
+        gScaler: 25.6,
+        bScaler: 0.1,
+        offset: -10000,
+      };
+
+      const terrainConfigPromise = pmtilesSource
+        .getHeader()
+        .then((header) => {
+          if (
+            header &&
+            Number.isFinite(header.minLon) &&
+            Number.isFinite(header.minLat) &&
+            Number.isFinite(header.maxLon) &&
+            Number.isFinite(header.maxLat)
+          ) {
+            return [header.minLon, header.minLat, header.maxLon, header.maxLat];
           }
-        : null;
+          return defaultTerrainBounds;
+        })
+        .catch(() => defaultTerrainBounds);
+
+      const baseTerrainConfig = {
+        elevationData: `pmtiles://${pmtilesUrl}/{z}/{x}/{y}`,
+        texture: null,
+        elevationDecoder: terrainDecoder,
+        fetch: pmtilesFetch,
+        minZoom: 5,
+        maxZoom: 15,
+        skirtHeight: 15,
+      };
+
+      const createTerrainExtensionConfig = (bounds) =>
+        terrainExtension ? { ...baseTerrainConfig, bounds } : null;
 
       const trailLayerProps = {
         id: "heritage-trail",
@@ -232,10 +265,9 @@
         parameters: {
           depthTest: false,
         },
-        coordinateSystem: deck.COORDINATE_SYSTEM.CARTESIAN,
+        coordinateSystem: COORDINATE_SYSTEM.CARTESIAN,
         extensions: terrainExtension ? [terrainExtension] : [],
         terrainDrawMode: "offset",
-        terrain: terrainConfig || undefined,
         getElevation: (feature) => (feature.geometry.type === "Point" ? 12 : 6),
       };
 
@@ -313,15 +345,25 @@
         })),
       });
 
-      const createTrailLayer = (data) =>
-        new deck.GeoJsonLayer({
+      const createTrailLayer = (data, terrainConfig) =>
+        new GeoJsonLayer({
           ...trailLayerProps,
           data,
           autoHighlight: true,
           pointType: "circle",
           getPointRadius: 30,
           pointRadiusUnits: "meters",
+          terrain: terrainConfig || undefined,
           onHover: updateTooltip,
+        });
+
+      const createTerrainLayer = (bounds) =>
+        new TerrainLayer({
+          id: "pmtiles-terrain-tiles",
+          ...baseTerrainConfig,
+          bounds,
+          material: { diffuse: 1 },
+          operation: "terrain+draw",
         });
 
       deckCanvas.addEventListener("mouseleave", () => {
@@ -360,15 +402,22 @@
 
         const initializeTrailLayer = async () => {
           try {
-            const response = await fetch(trailDataUrl);
+            const [bounds, response] = await Promise.all([
+              terrainConfigPromise,
+              fetch(trailDataUrl),
+            ]);
             if (!response.ok) {
               throw new Error(`Failed to load trail data: ${response.status}`);
             }
             const geojson = await response.json();
             const mercatorGeojson = convertFeatureCollectionToMercator(geojson);
+            const terrainConfig = createTerrainExtensionConfig(bounds);
+            const layers = [createTerrainLayer(bounds)];
+
+            layers.push(createTrailLayer(mercatorGeojson, terrainConfig));
 
             deckgl.setProps({
-              layers: [createTrailLayer(mercatorGeojson)],
+              layers,
             });
             deckReady = true;
             syncDeckViewState();
