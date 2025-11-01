@@ -143,10 +143,18 @@
       };
 
       const cloneViewState = (state) => ({
-        ...state,
+        longitude: state.longitude,
+        latitude: state.latitude,
+        bearing: state.bearing,
+        pitch: state.pitch,
+        zoom: state.zoom,
         position: Array.isArray(state.position)
           ? [...state.position]
           : [0, 0, fallbackCameraAltitude],
+      });
+
+      const wrapViewState = (state) => ({
+        [firstPersonViewId]: cloneViewState(state),
       });
 
       let lastDeckViewState = cloneViewState({
@@ -156,8 +164,6 @@
         pitch: clampPitch(map.getPitch()),
         zoom: map.getZoom(),
         position: [0, 0, getCameraAltitude()],
-        maxPitch: pitchLimits.max,
-        minPitch: pitchLimits.min,
       });
 
       const buildViewStateFromMap = () => {
@@ -178,8 +184,6 @@
           pitch: clampPitch(map.getPitch()),
           zoom: map.getZoom(),
           position: normalizePosition(lastDeckViewState.position, altitude),
-          maxPitch: pitchLimits.max,
-          minPitch: pitchLimits.min,
         };
       };
 
@@ -196,8 +200,6 @@
               ? lastDeckViewState.position[2]
               : getCameraAltitude(),
           ),
-          maxPitch: pitchLimits.max,
-          minPitch: pitchLimits.min,
         };
 
         lastDeckViewState = normalized;
@@ -209,21 +211,29 @@
 
       const deckInstance = new Deck({
         parent: deckContainer,
-        views: [new FirstPersonView({ id: firstPersonViewId })],
-        controller: {
-          type: FirstPersonController,
-          dragMode: "rotate",
-          dragPan: true,
-          keyboard: true,
-          scrollZoom: true,
-        },
-        initialViewState: cloneViewState(lastDeckViewState),
-        viewState: cloneViewState(lastDeckViewState),
+        views: [
+          new FirstPersonView({
+            id: firstPersonViewId,
+            controller: {
+              type: FirstPersonController,
+              dragMode: "rotate",
+              dragPan: true,
+              keyboard: true,
+              scrollZoom: true,
+            },
+          }),
+        ],
+        initialViewState: wrapViewState(lastDeckViewState),
+        viewState: wrapViewState(lastDeckViewState),
         layers: [],
         getTooltip: ({ object }) => tooltipFormatter(object),
-        onViewStateChange: ({ viewState }) => {
-          const fpState = viewState?.[firstPersonViewId] ?? viewState;
-          if (!fpState || syncingFromMap) {
+        onViewStateChange: ({ viewState, viewId }) => {
+          if (syncingFromMap || viewId !== firstPersonViewId) {
+            return;
+          }
+
+          const fpState = viewState?.[viewId] ?? viewState;
+          if (!fpState) {
             return;
           }
 
@@ -253,8 +263,8 @@
 
         syncingFromMap = true;
         const nextState = buildViewStateFromMap();
-        lastDeckViewState = nextState;
-        deckInstance.setProps({ viewState: cloneViewState(nextState) });
+        lastDeckViewState = cloneViewState(nextState);
+        deckInstance.setProps({ viewState: wrapViewState(lastDeckViewState) });
         syncingFromMap = false;
       };
 
