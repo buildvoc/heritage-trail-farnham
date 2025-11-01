@@ -36,6 +36,24 @@
         width: 100%;
       }
 
+      #map-inset {
+        position: absolute;
+        top: 16px;
+        right: 16px;
+        width: min(320px, 35vw);
+        height: min(240px, 35vh);
+        border: 2px solid rgba(31, 41, 55, 0.85);
+        border-radius: 12px;
+        overflow: hidden;
+        z-index: 8;
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+        background-color: rgba(17, 24, 39, 0.85);
+      }
+
+      #map-inset canvas {
+        border-radius: 10px;
+      }
+
       #deck-overlay {
         position: absolute;
         inset: 0;
@@ -58,7 +76,7 @@
         border-radius: 8px;
         background-color: rgba(17, 24, 39, 0.75);
         color: #f3f4f6;
-        z-index: 7;
+        z-index: 9;
         max-width: min(320px, 80vw);
         font-family:
           system-ui,
@@ -93,6 +111,7 @@
   </head>
   <body>
     <div id="map"></div>
+    <div id="map-inset" aria-label="Inset terrain map"></div>
     <div id="building-controls">
       <button id="fetch-building" type="button">Fetch nearest building</button>
       <div id="building-status" role="status" aria-live="polite"></div>
@@ -146,16 +165,38 @@
       const trailDataUrl =
         "LAD_Waverley_active-travel-heritage-trail-farnham.geojson";
 
-      const map = new maplibregl.Map({
-        style: "https://tiles.openfreemap.org/styles/liberty",
-        container: "map", // container id
+      const initialMapState = {
         center: [-0.796, 51.214],
         zoom: 16,
         pitch: 61,
         bearing: 0,
+      };
+
+      const map = new maplibregl.Map({
+        style: "https://tiles.openfreemap.org/styles/liberty",
+        container: "map", // container id
+        center: initialMapState.center,
+        zoom: initialMapState.zoom,
+        pitch: initialMapState.pitch,
+        bearing: initialMapState.bearing,
         maxPitch: 85,
         maxZoom: 20,
       });
+
+      const insetMapElement = document.getElementById("map-inset");
+      const mapInset = insetMapElement
+        ? new maplibregl.Map({
+            container: insetMapElement,
+            style: "https://tiles.openfreemap.org/styles/liberty",
+            center: initialMapState.center,
+            zoom: initialMapState.zoom - 1,
+            pitch: 45,
+            bearing: initialMapState.bearing,
+            maxPitch: 85,
+            maxZoom: 20,
+            attributionControl: false,
+          })
+        : null;
 
       /*
        * https://deck.gl/docs/api-reference/extensions/terrain-extension
@@ -398,6 +439,36 @@
         position: [0, 0, getCameraAltitude()],
       });
 
+      let insetUserInteracting = false;
+      let insetProgrammaticUpdate = false;
+
+      const syncInsetViewFromDeck = () => {
+        if (!mapInset || insetUserInteracting) {
+          return;
+        }
+
+        const targetZoom = Math.max(lastDeckViewState.zoom - 1, 12);
+        insetProgrammaticUpdate = true;
+        mapInset.jumpTo({
+          center: [lastDeckViewState.longitude, lastDeckViewState.latitude],
+          zoom: targetZoom,
+          bearing: lastDeckViewState.bearing,
+          pitch: 45,
+        });
+      };
+
+      if (mapInset) {
+        mapInset.on("movestart", () => {
+          if (!insetProgrammaticUpdate) {
+            insetUserInteracting = true;
+          }
+        });
+        mapInset.on("moveend", () => {
+          insetUserInteracting = false;
+          insetProgrammaticUpdate = false;
+        });
+      }
+
       const buildViewStateFromMap = () => {
         const center = map.getCenter();
         const altitudeCandidate =
@@ -510,6 +581,8 @@
         },
       });
 
+      syncInsetViewFromDeck();
+
       const syncDeckFromMap = () => {
         if (syncingFromDeck) {
           return;
@@ -519,6 +592,7 @@
         const nextState = buildViewStateFromMap();
         lastDeckViewState = cloneViewState(nextState);
         deckInstance.setProps({ viewState: wrapViewState(lastDeckViewState) });
+        syncInsetViewFromDeck();
         syncingFromMap = false;
       };
 
@@ -765,6 +839,43 @@
           showCompass: true,
         }),
       );
+
+      if (mapInset) {
+        mapInset.on("load", () => {
+          mapInset.addSource("terrainSourceInset", {
+            type: "raster-dem",
+            url: `pmtiles://${pmtilesUrl}`,
+            tileSize: 256,
+          });
+
+          mapInset.setTerrain({
+            source: "terrainSourceInset",
+            exaggeration: 1,
+          });
+
+          mapInset.addLayer({
+            id: "hillshadeLayerInset",
+            type: "hillshade",
+            source: "terrainSourceInset",
+            paint: {
+              "hillshade-shadow-color": "#000000",
+              "hillshade-highlight-color": "#ffffff",
+              "hillshade-accent-color": "#888888",
+            },
+          });
+
+          mapInset.addControl(
+            new maplibregl.NavigationControl({
+              visualizePitch: true,
+              showZoom: true,
+              showCompass: true,
+            }),
+          );
+
+          mapInset.resize();
+          syncInsetViewFromDeck();
+        });
+      }
     </script>
   </body>
 </html>
