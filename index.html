@@ -91,7 +91,7 @@
           sans-serif;
       }
 
-      #building-controls button {
+      #building-controls button:not(.deck-widget-reset-view__button) {
         padding: 8px 12px;
         font-size: 0.95rem;
         color: #111827;
@@ -160,6 +160,13 @@
       <button id="fetch-building" type="button">
         Fetch nearest building (pic2bim API)
       </button>
+      <button
+        id="reset-view-button"
+        type="button"
+        class="deck-widget-reset-view__button"
+      >
+        Reset view
+      </button>
       <label for="toggle-basemap">
         <input type="checkbox" id="toggle-basemap" name="toggle-basemap" />
         Show basemap and terrain
@@ -175,126 +182,9 @@
         MapView,
         PolygonLayer,
         COORDINATE_SYSTEM,
-        Widget: DeckWidget,
         _TerrainExtension,
         TerrainExtension: PublicTerrainExtension,
       } = deck;
-
-      const hasDeckWidgetSupport = typeof DeckWidget === "function";
-
-      class InlineResetViewWidget extends (hasDeckWidgetSupport
-        ? DeckWidget
-        : class {}) {
-        static defaultProps = {
-          ...(hasDeckWidgetSupport ? DeckWidget.defaultProps : {}),
-          id: "reset-view",
-          placement: "top-left",
-          label: "Reset view",
-          initialViewState: undefined,
-          viewId: null,
-        };
-
-        className = "deck-widget-reset-view";
-        placement = "top-left";
-
-        constructor(props = {}) {
-          if (!hasDeckWidgetSupport) {
-            throw new Error("Deck widgets are unavailable in this build.");
-          }
-          super({ ...InlineResetViewWidget.defaultProps, ...props });
-          this.placement = props.placement ?? this.placement;
-          this.viewId =
-            typeof props.viewId === "string"
-              ? props.viewId
-              : this.viewId ?? null;
-          this._handleClick = this.handleClick.bind(this);
-        }
-
-        setProps(props = {}) {
-          this.placement = props.placement ?? this.placement;
-          this.viewId =
-            typeof props.viewId === "string"
-              ? props.viewId
-              : this.viewId ?? null;
-          super.setProps({
-            ...props,
-            placement: this.placement,
-            viewId: this.viewId,
-          });
-        }
-
-        onRenderHTML(rootElement) {
-          if (!rootElement) {
-            return;
-          }
-
-          if (!this._button) {
-            this._button = document.createElement("button");
-            this._button.type = "button";
-            this._button.className = "deck-widget-reset-view__button";
-            this._button.addEventListener("click", this._handleClick);
-          }
-
-          const label = this.props.label ?? "Reset view";
-          this._button.textContent = label;
-          this._button.setAttribute("aria-label", label);
-          this._button.title = label;
-
-          rootElement.replaceChildren(this._button);
-        }
-
-        handleClick() {
-          const initialViewState =
-            this.props.initialViewState ?? this.deck?.props.initialViewState;
-          this.setViewState(initialViewState);
-        }
-
-        setViewState(viewState) {
-          if (!viewState || !this.deck) {
-            return;
-          }
-
-          const viewId =
-            typeof this.props.viewId === "string" &&
-            this.props.viewId.length > 0
-              ? this.props.viewId
-              : "default-view";
-          const targetState =
-            viewId !== "default-view" && viewState[viewId]
-              ? viewState[viewId]
-              : viewState;
-
-          if (!targetState) {
-            return;
-          }
-
-          try {
-            this.deck._onViewStateChange({
-              viewId,
-              viewState: { ...targetState },
-              interactionState: {},
-            });
-          } catch (error) {
-            console.error("Unable to reset deck view state", error);
-          }
-        }
-
-        onRemove() {
-          if (this._button) {
-            this._button.removeEventListener("click", this._handleClick);
-            this._button = null;
-          }
-        }
-      }
-
-      let resetViewWidgetInstance = null;
-      const deckWidgetRegistry = [];
-      const syncDeckWidgets = () => {
-        if (!deckInstance || !hasDeckWidgetSupport) {
-          return;
-        }
-        deckInstance.setProps({ widgets: [...deckWidgetRegistry] });
-      };
 
       const {
         fetchNearestBuilding,
@@ -309,6 +199,7 @@
       }
 
       const fetchBuildingButton = document.getElementById("fetch-building");
+      const resetViewButton = document.getElementById("reset-view-button");
       const buildingStatusElement = document.getElementById("building-status");
 
       const setBuildingStatus = (message, options = {}) => {
@@ -910,39 +801,38 @@
       let insetUserInteracting = false;
       let insetProgrammaticUpdate = false;
 
-      const ensureResetViewWidget = () => {
-        if (!deckInstance) {
+      const getInitialStateForMode = (mode) =>
+        cloneStateEntry(initialViewStateStore[mode]) ?? null;
+
+      const resetCurrentViewState = () => {
+        const initialEntry =
+          getInitialStateForMode(currentViewMode) ??
+          getInitialStateForMode("firstPerson");
+
+        if (!initialEntry) {
           return;
         }
 
-        if (!hasDeckWidgetSupport) {
-          console.warn(
-            "Deck widget API unavailable; Reset view control cannot be initialised.",
-          );
-          return;
-        }
+        const normalizedInitial = setViewStateForMode(
+          currentViewMode,
+          initialEntry,
+        );
 
-        const widgetProps = {
-          viewId: viewModeIds[currentViewMode],
-          initialViewState: wrapInitialViewStateForMode(currentViewMode),
-          label: "Reset view",
-        };
+        map.jumpTo({
+          center: [normalizedInitial.longitude, normalizedInitial.latitude],
+          bearing: normalizedInitial.bearing,
+          pitch: normalizedInitial.pitch,
+          zoom: normalizedInitial.zoom,
+        });
 
-        if (resetViewWidgetInstance) {
-          resetViewWidgetInstance.setProps(widgetProps);
-          syncDeckWidgets();
-          return;
-        }
-
-        try {
-          resetViewWidgetInstance = new InlineResetViewWidget(widgetProps);
-          if (!deckWidgetRegistry.includes(resetViewWidgetInstance)) {
-            deckWidgetRegistry.push(resetViewWidgetInstance);
+        if (currentViewMode !== "firstPerson") {
+          const firstPersonInitial = getInitialStateForMode("firstPerson");
+          if (firstPersonInitial) {
+            setViewStateForMode("firstPerson", firstPersonInitial);
           }
-          syncDeckWidgets();
-        } catch (error) {
-          console.error("Unable to initialize ResetViewWidget", error);
         }
+
+        syncDeckFromMap();
       };
 
       if (mapInset) {
@@ -1059,7 +949,6 @@
         viewState: wrapViewStateForMode(currentViewMode),
         layers: [],
         getTooltip: (info) => tooltipFormatter(info),
-        widgets: hasDeckWidgetSupport ? [...deckWidgetRegistry] : undefined,
         onViewStateChange: ({ viewState, viewId }) => {
           const mode = viewIdToMode[viewId] ?? currentViewMode;
           if (syncingFromMap || mode !== currentViewMode) {
@@ -1084,8 +973,6 @@
           syncDeckFromMap();
         },
       });
-
-      void ensureResetViewWidget();
 
       const syncDeckFromMap = () => {
         if (syncingFromDeck) {
@@ -1113,7 +1000,6 @@
           viewState: wrapViewStateForMode(mode),
         });
         syncInsetViewFromDeck();
-        void ensureResetViewWidget();
       };
 
       const handleViewShortcut = (event) => {
@@ -1163,6 +1049,12 @@
       if (fetchBuildingButton) {
         fetchBuildingButton.addEventListener("click", () => {
           void handleBuildingFetch();
+        });
+      }
+
+      if (resetViewButton) {
+        resetViewButton.addEventListener("click", () => {
+          resetCurrentViewState();
         });
       }
 
