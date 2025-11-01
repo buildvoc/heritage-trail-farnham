@@ -48,6 +48,12 @@
         maxZoom: 20,
       });
 
+      const deckOverlay = new deck.MapboxOverlay({
+        interleaved: true,
+      });
+
+      map.addControl(deckOverlay);
+
       map.on("load", () => {
         map.addSource("terrainSource", {
           type: "raster-dem",
@@ -78,7 +84,7 @@
           }),
         );
 
-        const deckOverlay = new deck.MapboxOverlay({
+        deckOverlay.setProps({
           layers: [
             new deck.GeoJsonLayer({
               id: "heritage-trail",
@@ -104,8 +110,6 @@
             }),
           ],
         });
-
-        map.addControl(deckOverlay);
       });
 
       map.addControl(
