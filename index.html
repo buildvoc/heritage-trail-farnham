@@ -88,6 +88,7 @@
       deckCanvas.style.height = "100%";
       deckCanvas.style.pointerEvents = "auto";
       deckCanvas.style.backgroundColor = "transparent";
+      deckCanvas.style.zIndex = "1";
       mapContainer.appendChild(deckCanvas);
 
       const tooltip = document.createElement("div");
@@ -357,7 +358,30 @@
         tooltip.style.display = "none";
       });
 
+      const disableInteraction = (interaction) => {
+        if (interaction && typeof interaction.disable === "function") {
+          interaction.disable();
+        }
+      };
+
+      const disableMapUserInteractions = () => {
+        disableInteraction(map.dragPan);
+        disableInteraction(map.dragRotate);
+        disableInteraction(map.scrollZoom);
+        disableInteraction(map.boxZoom);
+        disableInteraction(map.doubleClickZoom);
+        disableInteraction(map.touchZoomRotate);
+        disableInteraction(map.keyboard);
+      };
+
       map.on("load", () => {
+        const mapCanvas = map.getCanvas();
+        if (mapCanvas) {
+          mapCanvas.style.pointerEvents = "none";
+        }
+
+        disableMapUserInteractions();
+
         map.addSource("terrainSource", {
           type: "raster-dem",
           url: `pmtiles://${pmtilesUrl}`,
