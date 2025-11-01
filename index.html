@@ -102,6 +102,19 @@
         cursor: progress;
       }
 
+      #building-controls label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.9rem;
+      }
+
+      #building-controls input[type="checkbox"] {
+        width: 18px;
+        height: 18px;
+        accent-color: #fbbf24;
+      }
+
       #building-status {
         font-size: 0.85rem;
         line-height: 1.2;
@@ -114,6 +127,10 @@
     <div id="map-inset" aria-label="Inset terrain map"></div>
     <div id="building-controls">
       <button id="fetch-building" type="button">Fetch nearest building</button>
+      <label for="toggle-basemap">
+        <input type="checkbox" id="toggle-basemap" name="toggle-basemap" />
+        Show basemap and terrain
+      </label>
       <div id="building-status" role="status" aria-live="polite"></div>
     </div>
     <script>
@@ -156,6 +173,24 @@
         "Provide pic2bim credentials locally to enable building fetching.",
       );
 
+      const basemapToggle = document.getElementById("toggle-basemap");
+      const initialBasemapEnabled = false;
+      if (basemapToggle) {
+        basemapToggle.checked = initialBasemapEnabled;
+      }
+
+      const baseMapStyleUrl = "https://tiles.openfreemap.org/styles/liberty";
+      const createBlankStyle = () => ({
+        version: 8,
+        name: "Blank",
+        glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+        sources: {},
+        layers: [],
+      });
+
+      let basemapEnabled = initialBasemapEnabled;
+      let currentBasemapMode = basemapEnabled ? "tiled" : "blank";
+
       const protocol = new pmtiles.Protocol();
       maplibregl.addProtocol("pmtiles", protocol.tile);
       const pmtilesUrl = "output.pmtiles";
@@ -173,7 +208,7 @@
       };
 
       const map = new maplibregl.Map({
-        style: "https://tiles.openfreemap.org/styles/liberty",
+        style: basemapEnabled ? baseMapStyleUrl : createBlankStyle(),
         container: "map", // container id
         center: initialMapState.center,
         zoom: initialMapState.zoom,
@@ -515,6 +550,7 @@
       let deckInstance;
       let currentTrailLayer = null;
       let currentBuildingLayer = null;
+      let trailInitialized = false;
 
       const gatherActiveLayers = () => {
         const layers = [];
@@ -772,40 +808,103 @@
         });
       };
 
+      const terrainSourceId = "terrainSource";
+      const hillshadeLayerId = "hillshadeLayer";
+      const terrainControl = new maplibregl.TerrainControl({
+        source: terrainSourceId,
+        exaggeration: 1,
+      });
+      let terrainControlAdded = false;
+
+      const removeTerrainControl = () => {
+        if (terrainControlAdded) {
+          map.removeControl(terrainControl);
+          terrainControlAdded = false;
+        }
+      };
+
+      const ensureTerrainResources = () => {
+        if (!basemapEnabled) {
+          map.setTerrain(null);
+          if (map.getLayer(hillshadeLayerId)) {
+            map.removeLayer(hillshadeLayerId);
+          }
+          if (map.getSource(terrainSourceId)) {
+            map.removeSource(terrainSourceId);
+          }
+          removeTerrainControl();
+          return;
+        }
+
+        if (!map.getSource(terrainSourceId)) {
+          map.addSource(terrainSourceId, {
+            type: "raster-dem",
+            url: `pmtiles://${pmtilesUrl}`,
+            tileSize: 256,
+          });
+        }
+
+        map.setTerrain({
+          source: terrainSourceId,
+          exaggeration: 1,
+        });
+
+        if (!map.getLayer(hillshadeLayerId)) {
+          map.addLayer({
+            id: hillshadeLayerId,
+            type: "hillshade",
+            source: terrainSourceId,
+            paint: {
+              "hillshade-shadow-color": "#000000",
+              "hillshade-highlight-color": "#ffffff",
+              "hillshade-accent-color": "#888888",
+            },
+          });
+        }
+
+        if (!terrainControlAdded) {
+          map.addControl(terrainControl);
+          terrainControlAdded = true;
+        }
+      };
+
+      const applyBasemapState = (nextEnabled) => {
+        const targetMode = nextEnabled ? "tiled" : "blank";
+        basemapEnabled = nextEnabled;
+        if (targetMode === currentBasemapMode) {
+          return;
+        }
+
+        currentBasemapMode = targetMode;
+
+        if (!nextEnabled) {
+          removeTerrainControl();
+          map.setTerrain(null);
+          if (map.getLayer(hillshadeLayerId)) {
+            map.removeLayer(hillshadeLayerId);
+          }
+          if (map.getSource(terrainSourceId)) {
+            map.removeSource(terrainSourceId);
+          }
+        }
+
+        const nextStyle = nextEnabled ? baseMapStyleUrl : createBlankStyle();
+        map.setStyle(nextStyle);
+      };
+
+      if (basemapToggle) {
+        basemapToggle.addEventListener("change", (event) => {
+          applyBasemapState(Boolean(event.target?.checked));
+        });
+      }
+
       map.on("load", () => {
         disableMapGestures();
         map.getCanvas().style.pointerEvents = "none";
         deckContainer.style.pointerEvents = "auto";
         syncDeckFromMap();
 
-        map.addSource("terrainSource", {
-          type: "raster-dem",
-          url: `pmtiles://${pmtilesUrl}`,
-          tileSize: 256,
-        });
-
-        map.setTerrain({
-          source: "terrainSource",
-          exaggeration: 1,
-        });
-
-        map.addLayer({
-          id: "hillshadeLayer",
-          type: "hillshade",
-          source: "terrainSource",
-          paint: {
-            "hillshade-shadow-color": "#000000",
-            "hillshade-highlight-color": "#ffffff",
-            "hillshade-accent-color": "#888888",
-          },
-        });
-
-        map.addControl(
-          new maplibregl.TerrainControl({
-            source: "terrainSource",
-            exaggeration: 1,
-          }),
-        );
+        ensureTerrainResources();
 
         const initializeTrailLayer = async () => {
           try {
@@ -821,6 +920,7 @@
 
             currentTrailLayer = createTrailLayer(geojson, terrainConfig);
             updateDeckLayers();
+            trailInitialized = true;
           } catch (error) {
             console.error(
               "Unable to initialize the heritage trail layer",
@@ -829,7 +929,9 @@
           }
         };
 
-        void initializeTrailLayer();
+        if (!trailInitialized) {
+          void initializeTrailLayer();
+        }
       });
 
       map.addControl(
