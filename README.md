@@ -10,8 +10,9 @@ Live demo: [https://buildvoc.github.io/heritage-trail-farnham/](https://buildvoc
 
 ### Local pic2bim credentials
 
-The main map loads a hosted sample building footprint from GitHub Pages so you
-can immediately see an extruded polygon rendered with deck.gl’s
+The main map bundles a sample building footprint in
+`pic2bim-building.geojson`, ensuring the primary window immediately renders an
+extruded wireframe polygon using deck.gl’s
 [`PolygonLayer`](https://deck.gl/docs/api-reference/layers/polygon-layer#wireframe)
 configuration. To enable the optional pic2bim building lookup integration you
 must provide your own credentials. Copy `pic2bim-credentials.sample.js` to

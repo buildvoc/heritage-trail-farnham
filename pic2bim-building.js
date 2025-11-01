@@ -357,6 +357,13 @@
       return Number.isFinite(number) ? number : null;
     };
 
+    const directHeight =
+      parseNumber(properties.height) ??
+      parseNumber(properties["building:height"]);
+    if (directHeight !== null) {
+      return directHeight;
+    }
+
     const relativeHeight =
       parseNumber(properties.relativeheightmaximum) ??
       parseNumber(properties.relativeHeightMaximum);
@@ -371,13 +378,6 @@
       if (Number.isFinite(difference) && difference > 0) {
         return difference;
       }
-    }
-
-    const directHeight =
-      parseNumber(properties.height) ??
-      parseNumber(properties["building:height"]);
-    if (directHeight !== null) {
-      return directHeight;
     }
 
     const levels =

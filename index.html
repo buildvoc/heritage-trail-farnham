@@ -140,7 +140,6 @@
         Deck,
         FirstPersonController,
         FirstPersonView,
-        GeoJsonLayer,
         PolygonLayer,
         COORDINATE_SYSTEM,
         _TerrainExtension,
@@ -171,7 +170,7 @@
         buildingStatusElement.style.color = isError ? "#fca5a5" : "#bbf7d0";
       };
 
-      setBuildingStatus("Loading hosted sample building footprint…");
+      setBuildingStatus("Loading bundled sample building footprint…");
 
       const basemapToggle = document.getElementById("toggle-basemap");
       const initialBasemapEnabled = false;
@@ -197,11 +196,7 @@
       const pmtilesSource = new pmtiles.PMTiles(pmtilesUrl);
       protocol.add(pmtilesSource);
 
-      const trailDataUrl =
-        "LAD_Waverley_active-travel-heritage-trail-farnham.geojson";
-      // Hosted sample footprint with "height" attribute used for polygon extrusion.
-      const staticBuildingDataUrl =
-        "https://buildvoc.github.io/heritage-trail-farnham/pic2bim-building.geojson";
+      const staticBuildingDataUrl = "pic2bim-building.geojson";
 
       const initialMapState = {
         center: [-0.796, 51.214],
@@ -371,7 +366,7 @@
             currentBuildingLayer = null;
             updateDeckLayers();
             setBuildingStatus(
-              "Hosted sample building file did not contain polygon geometry.",
+              "Bundled sample building file did not contain polygon geometry.",
               { isError: true },
             );
             return;
@@ -380,15 +375,15 @@
           currentBuildingLayer = nextBuildingLayer;
           updateDeckLayers();
           setBuildingStatus(
-            "Loaded hosted sample building footprint. Provide pic2bim credentials locally to fetch live buildings.",
+            "Loaded bundled sample building footprint. Provide pic2bim credentials locally to fetch live buildings.",
           );
         } catch (error) {
           console.error(
-            "Unable to load hosted sample building footprint",
+            "Unable to load bundled sample building footprint",
             error,
           );
           setBuildingStatus(
-            "Unable to load hosted sample building footprint. Provide pic2bim credentials locally to fetch live buildings.",
+            "Unable to load bundled sample building footprint. Provide pic2bim credentials locally to fetch live buildings.",
             { isError: true },
           );
         }
@@ -438,10 +433,6 @@
             details.push(`Levels: ${levels}`);
           }
           return details.join("\n");
-        }
-
-        if (layerId === trailLayerProps.id) {
-          return `Trail: ${feature.properties?.name ?? "Heritage Trail"}`;
         }
 
         return null;
@@ -595,15 +586,10 @@
       let syncingFromMap = false;
 
       let deckInstance;
-      let currentTrailLayer = null;
       let currentBuildingLayer = null;
-      let trailInitialized = false;
 
       const gatherActiveLayers = () => {
         const layers = [];
-        if (currentTrailLayer) {
-          layers.push(currentTrailLayer);
-        }
         if (currentBuildingLayer) {
           layers.push(currentBuildingLayer);
         }
@@ -794,31 +780,6 @@
       const createTerrainExtensionConfig = (bounds) =>
         terrainExtension ? { ...baseTerrainConfig, bounds } : null;
 
-      const trailLayerProps = {
-        id: "heritage-trail",
-        lineWidthScale: 2,
-        lineWidthUnits: "pixels",
-        getLineColor: [255, 0, 0],
-        getLineWidth: 6,
-        pickable: true,
-        highlightColor: [255, 255, 0, 180],
-        coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
-        extensions: terrainExtension ? [terrainExtension] : [],
-        terrainDrawMode: "offset",
-        getElevation: (feature) => (feature.geometry.type === "Point" ? 12 : 6),
-      };
-
-      const createTrailLayer = (data, terrainConfig) =>
-        new GeoJsonLayer({
-          ...trailLayerProps,
-          data,
-          autoHighlight: true,
-          pointType: "circle",
-          getPointRadius: 12,
-          pointRadiusUnits: "pixels",
-          terrain: terrainConfig || undefined,
-        });
-
       const buildingLayerProps = {
         id: buildingLayerId,
         stroked: true,
@@ -953,33 +914,6 @@
 
         ensureTerrainResources();
         void loadSampleBuildingLayer();
-
-        const initializeTrailLayer = async () => {
-          try {
-            const [bounds, response] = await Promise.all([
-              terrainConfigPromise,
-              fetch(trailDataUrl),
-            ]);
-            if (!response.ok) {
-              throw new Error(`Failed to load trail data: ${response.status}`);
-            }
-            const geojson = await response.json();
-            const terrainConfig = createTerrainExtensionConfig(bounds);
-
-            currentTrailLayer = createTrailLayer(geojson, terrainConfig);
-            updateDeckLayers();
-            trailInitialized = true;
-          } catch (error) {
-            console.error(
-              "Unable to initialize the heritage trail layer",
-              error,
-            );
-          }
-        };
-
-        if (!trailInitialized) {
-          void initializeTrailLayer();
-        }
       });
 
       map.addControl(
