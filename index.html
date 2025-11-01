@@ -27,16 +27,51 @@
         bottom: 0;
         width: 100%;
       }
+
+      #deck-overlay {
+        position: absolute;
+        inset: 0;
+        z-index: 2;
+      }
+
+      .deck-canvas {
+        width: 100%;
+        height: 100%;
+        display: block;
+        pointer-events: auto;
+        outline: none;
+      }
+
+      #deck-tooltip {
+        position: absolute;
+        pointer-events: none;
+        z-index: 5;
+        background: rgba(0, 0, 0, 0.8);
+        color: #fff;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-family: sans-serif;
+        font-size: 12px;
+        display: none;
+        white-space: nowrap;
+        transform: translate(-50%, -120%);
+      }
+
+      .maplibregl-ctrl-top-right {
+        z-index: 6;
+      }
     </style>
   </head>
   <body>
     <div id="map"></div>
+    <div id="deck-overlay"></div>
+    <div id="deck-tooltip" role="status" aria-live="polite"></div>
     <script>
       const {
+        Deck,
         GeoJsonLayer,
         FirstPersonController,
         FirstPersonView,
-        MapboxOverlay,
         COORDINATE_SYSTEM,
         _TerrainExtension,
         TerrainExtension: PublicTerrainExtension,
@@ -70,8 +105,24 @@
         ? new TerrainExtension({ terrainDrawMode: "offset" })
         : null;
 
-      const deckOverlay = new MapboxOverlay({
-        interleaved: true,
+      const overlayContainer = document.getElementById("deck-overlay");
+      const tooltip = document.getElementById("deck-tooltip");
+
+      const deckCanvas = document.createElement("canvas");
+      deckCanvas.id = "deck-canvas";
+      deckCanvas.className = "deck-canvas";
+      deckCanvas.setAttribute(
+        "aria-label",
+        "Deck.gl interactive terrain overlay",
+      );
+      deckCanvas.setAttribute("role", "application");
+      deckCanvas.setAttribute("tabindex", "0");
+      overlayContainer.appendChild(deckCanvas);
+
+      const deckInstance = new Deck({
+        canvas: deckCanvas,
+        width: "100%",
+        height: "100%",
         controller: {
           type: FirstPersonController,
           dragMode: "rotate",
@@ -189,6 +240,11 @@
       const createTerrainExtensionConfig = (bounds) =>
         terrainExtension ? { ...baseTerrainConfig, bounds } : null;
 
+      const tooltipFormatter = (feature) =>
+        feature
+          ? `Trail: ${feature.properties?.name ?? "Heritage Trail"}`
+          : null;
+
       const trailLayerProps = {
         id: "heritage-trail",
         lineWidthScale: 2,
@@ -213,6 +269,85 @@
           pointRadiusUnits: "pixels",
           terrain: terrainConfig || undefined,
         });
+
+      const mapViewState = () => ({
+        longitude: map.getCenter().lng,
+        latitude: map.getCenter().lat,
+        zoom: map.getZoom(),
+        pitch: map.getPitch(),
+        bearing: map.getBearing(),
+      });
+
+      const approximateCameraAltitude = () => {
+        if (typeof map.getFreeCameraOptions === "function") {
+          const freeCamera = map.getFreeCameraOptions();
+          if (freeCamera?.position && Number.isFinite(freeCamera.position[2])) {
+            return freeCamera.position[2];
+          }
+        }
+        const pitchRadians = (map.getPitch() * Math.PI) / 180;
+        const metersPerPixel =
+          (40075016.68557849 *
+            Math.abs(Math.cos((map.getCenter().lat * Math.PI) / 180))) /
+          Math.pow(2, map.getZoom() + 8);
+        const altitude =
+          metersPerPixel * window.innerHeight * Math.sin(pitchRadians);
+        return Number.isFinite(altitude) && altitude > 0 ? altitude + 15 : 60;
+      };
+
+      const currentFirstPersonViewState = () => ({
+        ...mapViewState(),
+        position: [0, 0, approximateCameraAltitude()],
+      });
+
+      const updateDeckViewStateFromMap = () => {
+        deckInstance.setProps({ viewState: currentFirstPersonViewState() });
+      };
+
+      const focusDeckCanvas = () => {
+        requestAnimationFrame(() => deckCanvas.focus());
+      };
+
+      deckCanvas.addEventListener("mousedown", focusDeckCanvas);
+      deckCanvas.addEventListener("touchstart", focusDeckCanvas, {
+        passive: true,
+      });
+      deckCanvas.addEventListener("mouseenter", focusDeckCanvas);
+      deckCanvas.addEventListener("mouseleave", () => {
+        tooltip.style.display = "none";
+      });
+
+      let suppressMapSync = false;
+
+      deckInstance.setProps({
+        onViewStateChange: ({ viewState }) => {
+          if (!viewState || suppressMapSync) {
+            return;
+          }
+          suppressMapSync = true;
+          map.jumpTo({
+            center: [viewState.longitude, viewState.latitude],
+            zoom: viewState.zoom,
+            pitch: viewState.pitch,
+            bearing: viewState.bearing,
+          });
+          map.once("moveend", () => {
+            suppressMapSync = false;
+            updateDeckViewStateFromMap();
+          });
+        },
+        onHover: ({ object, x, y }) => {
+          const content = tooltipFormatter(object);
+          if (content) {
+            tooltip.textContent = content;
+            tooltip.style.display = "block";
+            tooltip.style.left = `${Math.round(x)}px`;
+            tooltip.style.top = `${Math.round(y)}px`;
+          } else {
+            tooltip.style.display = "none";
+          }
+        },
+      });
 
       map.on("load", () => {
         map.addSource("terrainSource", {
@@ -256,9 +391,10 @@
             const geojson = await response.json();
             const terrainConfig = createTerrainExtensionConfig(bounds);
 
-            deckOverlay.setProps({
+            deckInstance.setProps({
               layers: [createTrailLayer(geojson, terrainConfig)],
             });
+            updateDeckViewStateFromMap();
           } catch (error) {
             console.error(
               "Unable to initialize the heritage trail layer",
@@ -278,7 +414,23 @@
         }),
       );
 
-      map.addControl(deckOverlay);
+      map.on("move", () => {
+        if (suppressMapSync) {
+          return;
+        }
+        updateDeckViewStateFromMap();
+      });
+
+      map.on("load", () => {
+        map.getCanvas().style.pointerEvents = "none";
+        map.scrollZoom.disable();
+        map.dragPan.disable();
+        map.dragRotate.disable();
+        map.keyboard.disable();
+        map.touchZoomRotate.disableRotation();
+        updateDeckViewStateFromMap();
+        focusDeckCanvas();
+      });
     </script>
   </body>
 </html>
