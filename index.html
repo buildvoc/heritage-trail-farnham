@@ -72,18 +72,43 @@
       deckCanvas.style.left = "0";
       deckCanvas.style.width = "100%";
       deckCanvas.style.height = "100%";
-      deckCanvas.style.pointerEvents = "none";
+      deckCanvas.style.pointerEvents = "auto";
       mapContainer.appendChild(deckCanvas);
 
       const tooltip = document.createElement("div");
       tooltip.id = "deck-tooltip";
       mapContainer.appendChild(tooltip);
 
+      let deckReady = false;
+      let deckSyncInProgress = false;
+      let mapSyncInProgress = false;
+
       const deckgl = new deck.Deck({
         canvas: deckCanvas,
         width: "100%",
         height: "100%",
-        controller: false,
+        controller: {
+          type: deck.OrbitController,
+          dragMode: "pan",
+          keyboard: false,
+        },
+        onViewStateChange: ({ viewState }) => {
+          if (!deckReady || mapSyncInProgress) {
+            return;
+          }
+
+          deckSyncInProgress = true;
+          try {
+            map.jumpTo({
+              center: [viewState.target[0], viewState.target[1]],
+              zoom: viewState.zoom,
+              pitch: viewState.rotationX,
+              bearing: viewState.rotationOrbit,
+            });
+          } finally {
+            deckSyncInProgress = false;
+          }
+        },
         views: [
           new deck.OrbitView({
             id: "orbit-view",
@@ -101,17 +126,12 @@
         getLineColor: [255, 0, 0],
         getLineWidth: 6,
         pickable: true,
-        highlightedObjectIndex: -1,
         highlightColor: [255, 255, 0, 180],
         parameters: {
           depthTest: false,
         },
         coordinateSystem: deck.COORDINATE_SYSTEM.LNGLAT,
       };
-
-      let trailLayer = null;
-      let highlightedIndex = -1;
-      let deckReady = false;
 
       const currentOrbitViewState = () => {
         const center = map.getCenter();
@@ -125,22 +145,43 @@
         };
       };
 
-      const applyTrailLayer = (newHighlight = highlightedIndex) => {
-        highlightedIndex = newHighlight;
-        trailLayer = new deck.GeoJsonLayer({
-          ...trailLayerProps,
-          highlightedObjectIndex: highlightedIndex,
-        });
-        deckgl.setProps({
-          layers: [trailLayer],
-        });
+      const syncDeckViewState = () => {
+        if (deckSyncInProgress) {
+          return;
+        }
+
+        mapSyncInProgress = true;
+        try {
+          deckgl.setProps({
+            viewState: currentOrbitViewState(),
+          });
+        } finally {
+          mapSyncInProgress = false;
+        }
       };
 
-      const syncDeckViewState = () => {
-        deckgl.setProps({
-          viewState: currentOrbitViewState(),
-        });
+      const updateTooltip = (info) => {
+        if (info.object) {
+          const name = info.object.properties?.Name;
+          tooltip.textContent = name ? `Trail: ${name}` : "Heritage Trail";
+          tooltip.style.display = "block";
+          tooltip.style.left = `${info.x}px`;
+          tooltip.style.top = `${info.y}px`;
+        } else {
+          tooltip.style.display = "none";
+        }
       };
+
+      const createTrailLayer = () =>
+        new deck.GeoJsonLayer({
+          ...trailLayerProps,
+          autoHighlight: true,
+          onHover: updateTooltip,
+        });
+
+      deckCanvas.addEventListener("mouseleave", () => {
+        tooltip.style.display = "none";
+      });
 
       map.on("load", () => {
         map.addSource("terrainSource", {
@@ -172,7 +213,9 @@
           }),
         );
 
-        applyTrailLayer();
+        deckgl.setProps({
+          layers: [createTrailLayer()],
+        });
         syncDeckViewState();
         deckReady = true;
       });
@@ -187,46 +230,6 @@
 
       map.on("resize", () => {
         deckgl.resize();
-      });
-
-      map.on("mousemove", (event) => {
-        if (!deckReady) {
-          return;
-        }
-
-        const pickInfo = deckgl.pickObject({
-          x: event.point.x,
-          y: event.point.y,
-          layerIds: ["heritage-trail"],
-        });
-
-        if (pickInfo && pickInfo.index !== highlightedIndex) {
-          applyTrailLayer(pickInfo.index);
-        } else if (!pickInfo && highlightedIndex !== -1) {
-          applyTrailLayer(-1);
-        }
-
-        if (pickInfo && pickInfo.object) {
-          const name = pickInfo.object.properties?.Name;
-          tooltip.textContent = name ? `Trail: ${name}` : "Heritage Trail";
-          tooltip.style.display = "block";
-          tooltip.style.left = `${event.point.x}px`;
-          tooltip.style.top = `${event.point.y}px`;
-        } else {
-          tooltip.style.display = "none";
-        }
-      });
-
-      map.getCanvasContainer().addEventListener("mouseleave", () => {
-        if (!deckReady) {
-          return;
-        }
-
-        if (highlightedIndex !== -1) {
-          applyTrailLayer(-1);
-        }
-
-        tooltip.style.display = "none";
       });
 
       map.on("remove", () => {
