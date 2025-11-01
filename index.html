@@ -142,6 +142,8 @@
         FirstPersonView,
         MapController,
         MapView,
+        OrbitController,
+        OrbitView,
         PolygonLayer,
         COORDINATE_SYSTEM,
         _TerrainExtension,
@@ -494,10 +496,19 @@
         firstPerson: "first-person-view",
         map: "map-view",
         orthographic: "orthographic-view",
+        orbit: "orbit-view",
       };
       const pitchLimits = { min: 0, max: 85 };
       const fallbackCameraAltitude = 120;
       let freeCameraWarningLogged = false;
+
+      const normalizeBearing = (value) => {
+        if (!Number.isFinite(value)) {
+          return 0;
+        }
+        const wrapped = ((value % 360) + 360) % 360;
+        return wrapped > 180 ? wrapped - 360 : wrapped;
+      };
 
       const clampPitch = (value) =>
         Math.max(
@@ -558,6 +569,7 @@
       const createInitialViewStates = () => {
         const base = getMapDerivedBaseState();
         const altitude = getCameraAltitude();
+        const orbitTarget = [base.longitude, base.latitude, 0];
         return {
           firstPerson: {
             ...base,
@@ -565,6 +577,12 @@
           },
           map: { ...base },
           orthographic: { ...base, pitch: 0 },
+          orbit: {
+            ...base,
+            target: orbitTarget,
+            rotationOrbit: -base.bearing,
+            rotationX: base.pitch,
+          },
         };
       };
 
@@ -608,6 +626,27 @@
           state.position = [...existing.position];
         }
 
+        if (mode === "orbit") {
+          const previousTarget = Array.isArray(existing.target)
+            ? existing.target
+            : [state.longitude, state.latitude, 0];
+          state.target = [
+            Number.isFinite(previousTarget[0])
+              ? previousTarget[0]
+              : state.longitude,
+            Number.isFinite(previousTarget[1])
+              ? previousTarget[1]
+              : state.latitude,
+            Number.isFinite(previousTarget[2]) ? previousTarget[2] : 0,
+          ];
+          state.rotationOrbit = Number.isFinite(existing.rotationOrbit)
+            ? existing.rotationOrbit
+            : -state.bearing;
+          state.rotationX = Number.isFinite(existing.rotationX)
+            ? existing.rotationX
+            : state.pitch;
+        }
+
         return state;
       };
 
@@ -618,26 +657,43 @@
       };
 
       const setViewStateForMode = (mode, nextState) => {
-        const previous =
-          cloneViewStateForMode(mode) ?? getMapDerivedBaseState();
+        const fallbackBase = getMapDerivedBaseState();
+        const previous = cloneViewStateForMode(mode) ?? fallbackBase;
+
+        let longitude = Number.isFinite(nextState?.longitude)
+          ? nextState.longitude
+          : Number.isFinite(previous?.longitude)
+            ? previous.longitude
+            : fallbackBase.longitude;
+        let latitude = Number.isFinite(nextState?.latitude)
+          ? nextState.latitude
+          : Number.isFinite(previous?.latitude)
+            ? previous.latitude
+            : fallbackBase.latitude;
+        let bearing = Number.isFinite(nextState?.bearing)
+          ? nextState.bearing
+          : Number.isFinite(previous?.bearing)
+            ? previous.bearing
+            : fallbackBase.bearing;
+        let pitch = clampPitch(
+          Number.isFinite(nextState?.pitch)
+            ? nextState.pitch
+            : Number.isFinite(previous?.pitch)
+              ? previous.pitch
+              : fallbackBase.pitch,
+        );
+        const zoom = Number.isFinite(nextState?.zoom)
+          ? nextState.zoom
+          : Number.isFinite(previous?.zoom)
+            ? previous.zoom
+            : fallbackBase.zoom;
+
         const normalized = {
-          longitude: Number.isFinite(nextState?.longitude)
-            ? nextState.longitude
-            : previous.longitude,
-          latitude: Number.isFinite(nextState?.latitude)
-            ? nextState.latitude
-            : previous.latitude,
-          bearing: Number.isFinite(nextState?.bearing)
-            ? nextState.bearing
-            : previous.bearing,
-          pitch: clampPitch(
-            Number.isFinite(nextState?.pitch)
-              ? nextState.pitch
-              : previous.pitch,
-          ),
-          zoom: Number.isFinite(nextState?.zoom)
-            ? nextState.zoom
-            : previous.zoom,
+          longitude,
+          latitude,
+          bearing,
+          pitch,
+          zoom,
         };
 
         if (mode === "firstPerson") {
@@ -652,6 +708,55 @@
           );
         } else if (Array.isArray(nextState?.position)) {
           normalized.position = [...nextState.position];
+        }
+
+        if (mode === "orbit") {
+          const previousTarget = Array.isArray(previous?.target)
+            ? previous.target
+            : [longitude, latitude, 0];
+          const requestedTarget = Array.isArray(nextState?.target)
+            ? nextState.target
+            : previousTarget;
+          const targetLongitude = Number.isFinite(requestedTarget[0])
+            ? requestedTarget[0]
+            : longitude;
+          const targetLatitude = Number.isFinite(requestedTarget[1])
+            ? requestedTarget[1]
+            : latitude;
+          const targetAltitude = Number.isFinite(requestedTarget[2])
+            ? requestedTarget[2]
+            : Number.isFinite(previousTarget[2])
+              ? previousTarget[2]
+              : 0;
+
+          longitude = targetLongitude;
+          latitude = targetLatitude;
+
+          const rotationOrbit = Number.isFinite(nextState?.rotationOrbit)
+            ? nextState.rotationOrbit
+            : Number.isFinite(previous?.rotationOrbit)
+              ? previous.rotationOrbit
+              : -bearing;
+          const rotationX = Number.isFinite(nextState?.rotationX)
+            ? nextState.rotationX
+            : Number.isFinite(previous?.rotationX)
+              ? previous.rotationX
+              : pitch;
+
+          bearing = Number.isFinite(nextState?.bearing)
+            ? nextState.bearing
+            : normalizeBearing(-rotationOrbit);
+          pitch = clampPitch(
+            Number.isFinite(nextState?.pitch) ? nextState.pitch : rotationX,
+          );
+
+          normalized.longitude = longitude;
+          normalized.latitude = latitude;
+          normalized.bearing = bearing;
+          normalized.pitch = pitch;
+          normalized.target = [targetLongitude, targetLatitude, targetAltitude];
+          normalized.rotationOrbit = rotationOrbit;
+          normalized.rotationX = rotationX;
         }
 
         viewStateStore[mode] = normalized;
@@ -703,6 +808,10 @@
           position: [0, 0, altitude],
         };
 
+        const previousOrbit = cloneViewStateForMode("orbit") ?? {
+          target: [base.longitude, base.latitude, 0],
+        };
+
         viewStateStore = {
           firstPerson: {
             ...base,
@@ -721,6 +830,19 @@
             ...viewStateStore.orthographic,
             ...base,
             pitch: 0,
+          },
+          orbit: {
+            ...viewStateStore.orbit,
+            ...base,
+            target: [
+              base.longitude,
+              base.latitude,
+              Number.isFinite(previousOrbit.target?.[2])
+                ? previousOrbit.target[2]
+                : 0,
+            ],
+            rotationOrbit: -base.bearing,
+            rotationX: base.pitch,
           },
         };
       };
@@ -747,6 +869,13 @@
           scrollZoom: true,
           keyboard: true,
         },
+        orbit: {
+          type: OrbitController,
+          dragMode: "rotate",
+          dragPan: true,
+          scrollZoom: true,
+          keyboard: true,
+        },
       };
 
       const createViewForMode = (mode) => {
@@ -761,6 +890,12 @@
             id: viewModeIds.orthographic,
             controller: viewControllers.orthographic,
             orthographic: true,
+          });
+        }
+        if (mode === "orbit") {
+          return new OrbitView({
+            id: viewModeIds.orbit,
+            controller: viewControllers.orbit,
           });
         }
         return new FirstPersonView({
@@ -875,6 +1010,9 @@
         } else if (key === "D") {
           event.preventDefault();
           setViewMode("firstPerson");
+        } else if (key === "O") {
+          event.preventDefault();
+          setViewMode("orbit");
         }
       };
 
