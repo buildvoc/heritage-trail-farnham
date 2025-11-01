@@ -198,6 +198,56 @@
           return looksLikeTokenString(payload) ? payload.trim() : null;
         }
 
+        const inspectObjectForToken = (object) => {
+          if (!object || typeof object !== "object" || Array.isArray(object)) {
+            return null;
+          }
+
+          const directTokenKeys = [
+            "token",
+            "accessToken",
+            "access_token",
+            "bearer",
+            "jwt",
+            "authorization",
+          ];
+
+          for (const key of directTokenKeys) {
+            const value = object[key];
+            if (typeof value === "string" && value.trim()) {
+              return value.trim();
+            }
+          }
+
+          const nestedTokenKeys = ["data", "result", "payload"];
+          for (const key of nestedTokenKeys) {
+            const nested = object[key];
+            const candidate = parseTokenFromResponse(nested);
+            if (candidate) {
+              return candidate;
+            }
+          }
+
+          for (const [key, value] of Object.entries(object)) {
+            if (
+              typeof value === "string" &&
+              /token|bearer|jwt|access/i.test(key) &&
+              looksLikeTokenString(value)
+            ) {
+              return value.trim();
+            }
+          }
+
+          for (const value of Object.values(object)) {
+            const candidate = parseTokenFromResponse(value);
+            if (candidate) {
+              return candidate;
+            }
+          }
+
+          return null;
+        };
+
         if (Array.isArray(payload)) {
           for (const item of payload) {
             const candidate = parseTokenFromResponse(item);
@@ -208,29 +258,7 @@
           return null;
         }
 
-        if (typeof payload !== "object") {
-          return null;
-        }
-
-        for (const [key, value] of Object.entries(payload)) {
-          if (typeof value === "string") {
-            if (
-              /token|bearer|jwt|access/i.test(key) &&
-              looksLikeTokenString(value)
-            ) {
-              return value.trim();
-            }
-          }
-        }
-
-        for (const value of Object.values(payload)) {
-          const candidate = parseTokenFromResponse(value);
-          if (candidate) {
-            return candidate;
-          }
-        }
-
-        return null;
+        return inspectObjectForToken(payload);
       };
 
       const parseResponsePayload = (rawBody) => {
