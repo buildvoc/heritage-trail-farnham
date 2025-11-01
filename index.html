@@ -52,6 +52,9 @@
       const pmtilesSource = new pmtiles.PMTiles(pmtilesUrl);
       protocol.add(pmtilesSource);
 
+      const trailDataUrl =
+        "LAD_Waverley_active-travel-heritage-trail-farnham.geojson";
+
       const map = new maplibregl.Map({
         style: "https://tiles.openfreemap.org/styles/liberty",
         container: "map", // container id
@@ -97,10 +100,20 @@
             return;
           }
 
+          if (!Array.isArray(viewState.target)) {
+            return;
+          }
+
           deckSyncInProgress = true;
           try {
+            const targetCoordinate = new maplibregl.MercatorCoordinate(
+              viewState.target[0],
+              viewState.target[1],
+              viewState.target[2] ?? 0,
+            ).toLngLat();
+
             map.jumpTo({
-              center: [viewState.target[0], viewState.target[1]],
+              center: [targetCoordinate.lng, targetCoordinate.lat],
               zoom: viewState.zoom,
               pitch: viewState.rotationX,
               bearing: viewState.rotationOrbit,
@@ -120,7 +133,6 @@
 
       const trailLayerProps = {
         id: "heritage-trail",
-        data: "LAD_Waverley_active-travel-heritage-trail-farnham.geojson",
         lineWidthScale: 2,
         lineWidthUnits: "pixels",
         getLineColor: [255, 0, 0],
@@ -130,13 +142,17 @@
         parameters: {
           depthTest: false,
         },
-        coordinateSystem: deck.COORDINATE_SYSTEM.LNGLAT,
+        coordinateSystem: deck.COORDINATE_SYSTEM.CARTESIAN,
       };
 
       const currentOrbitViewState = () => {
         const center = map.getCenter();
+        const centerMercator = maplibregl.MercatorCoordinate.fromLngLat(
+          { lng: center.lng, lat: center.lat },
+          0,
+        );
         return {
-          target: [center.lng, center.lat, 0],
+          target: [centerMercator.x, centerMercator.y, centerMercator.z ?? 0],
           rotationOrbit: map.getBearing(),
           rotationX: map.getPitch(),
           zoom: map.getZoom(),
@@ -162,7 +178,7 @@
 
       const updateTooltip = (info) => {
         if (info.object) {
-          const name = info.object.properties?.Name;
+          const name = info.object.properties?.name;
           tooltip.textContent = name ? `Trail: ${name}` : "Heritage Trail";
           tooltip.style.display = "block";
           tooltip.style.left = `${info.x}px`;
@@ -172,9 +188,41 @@
         }
       };
 
-      const createTrailLayer = () =>
+      const toMercatorPosition = (coords) => {
+        const [lng, lat, altitude = 0] = coords;
+        const mercator = maplibregl.MercatorCoordinate.fromLngLat(
+          { lng, lat },
+          altitude,
+        );
+        return [mercator.x, mercator.y, mercator.z ?? 0];
+      };
+
+      const convertGeometryToMercator = (geometry) => {
+        const convert = (coordinates) => {
+          if (typeof coordinates[0] === "number") {
+            return toMercatorPosition(coordinates);
+          }
+          return coordinates.map(convert);
+        };
+
+        return {
+          ...geometry,
+          coordinates: convert(geometry.coordinates),
+        };
+      };
+
+      const convertFeatureCollectionToMercator = (featureCollection) => ({
+        ...featureCollection,
+        features: featureCollection.features.map((feature) => ({
+          ...feature,
+          geometry: convertGeometryToMercator(feature.geometry),
+        })),
+      });
+
+      const createTrailLayer = (data) =>
         new deck.GeoJsonLayer({
           ...trailLayerProps,
+          data,
           autoHighlight: true,
           onHover: updateTooltip,
         });
@@ -213,11 +261,30 @@
           }),
         );
 
-        deckgl.setProps({
-          layers: [createTrailLayer()],
-        });
+        const initializeTrailLayer = async () => {
+          try {
+            const response = await fetch(trailDataUrl);
+            if (!response.ok) {
+              throw new Error(`Failed to load trail data: ${response.status}`);
+            }
+            const geojson = await response.json();
+            const mercatorGeojson = convertFeatureCollectionToMercator(geojson);
+
+            deckgl.setProps({
+              layers: [createTrailLayer(mercatorGeojson)],
+            });
+            deckReady = true;
+            syncDeckViewState();
+          } catch (error) {
+            console.error(
+              "Unable to initialize the heritage trail layer",
+              error,
+            );
+          }
+        };
+
         syncDeckViewState();
-        deckReady = true;
+        void initializeTrailLayer();
       });
 
       map.on("render", () => {
