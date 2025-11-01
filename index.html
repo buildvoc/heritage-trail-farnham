@@ -15,6 +15,11 @@
     ></script>
     <script src="https://unpkg.com/pmtiles@4.1.0/dist/pmtiles.js"></script>
     <script src="https://unpkg.com/deck.gl@9.0.37/dist.min.js"></script>
+    <!--
+      The credentials script must define window.pic2bimCredentials with
+      { username: "...", password: "..." } and should never be committed.
+    -->
+    <script src="pic2bim-credentials.local.js" defer></script>
     <style>
       body {
         margin: 0;
@@ -38,10 +43,57 @@
       .maplibregl-ctrl-top-right {
         z-index: 6;
       }
+
+      #building-controls {
+        position: absolute;
+        top: 12px;
+        left: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 12px;
+        border-radius: 8px;
+        background-color: rgba(17, 24, 39, 0.75);
+        color: #f3f4f6;
+        z-index: 7;
+        max-width: min(320px, 80vw);
+        font-family:
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+      }
+
+      #building-controls button {
+        padding: 8px 12px;
+        font-size: 0.95rem;
+        color: #111827;
+        background-color: #fbbf24;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-weight: 600;
+      }
+
+      #building-controls button:disabled {
+        opacity: 0.6;
+        cursor: progress;
+      }
+
+      #building-status {
+        font-size: 0.85rem;
+        line-height: 1.2;
+        min-height: 1.2em;
+      }
     </style>
   </head>
   <body>
     <div id="map"></div>
+    <div id="building-controls">
+      <button id="fetch-building" type="button">Fetch nearest building</button>
+      <div id="building-status" role="status" aria-live="polite"></div>
+    </div>
     <script>
       const {
         Deck,
@@ -52,6 +104,27 @@
         _TerrainExtension,
         TerrainExtension: PublicTerrainExtension,
       } = deck;
+
+      const PIC2BIM_DOMAIN = "https://pic2bim.co.uk";
+      const PIC2BIM_LOGIN_PATH = "/comm_login";
+      const PIC2BIM_BUILDING_PATH = "/comm_osm_building_part_nearest";
+      const PIC2BIM_TOKEN_BUFFER_MS = 30_000;
+
+      const fetchBuildingButton = document.getElementById("fetch-building");
+      const buildingStatusElement = document.getElementById("building-status");
+
+      const setBuildingStatus = (message, options = {}) => {
+        if (!buildingStatusElement) {
+          return;
+        }
+        const { isError = false } = options;
+        buildingStatusElement.textContent = message;
+        buildingStatusElement.style.color = isError ? "#fca5a5" : "#bbf7d0";
+      };
+
+      setBuildingStatus(
+        "Provide pic2bim credentials locally to enable building fetching.",
+      );
 
       const protocol = new pmtiles.Protocol();
       maplibregl.addProtocol("pmtiles", protocol.tile);
@@ -81,16 +154,377 @@
         ? new TerrainExtension({ terrainDrawMode: "offset" })
         : null;
 
+      const pic2bimAuthState = { token: null, expiresAt: 0 };
+
+      const getPic2bimCredentials = () => {
+        const credentials = window.pic2bimCredentials;
+        if (
+          credentials &&
+          typeof credentials.username === "string" &&
+          credentials.username &&
+          typeof credentials.password === "string" &&
+          credentials.password
+        ) {
+          return {
+            username: credentials.username,
+            password: credentials.password,
+          };
+        }
+        return null;
+      };
+
+      const parseTokenFromResponse = (payload) => {
+        if (!payload) {
+          return null;
+        }
+        if (typeof payload === "string") {
+          return payload;
+        }
+        if (typeof payload.token === "string") {
+          return payload.token;
+        }
+        if (typeof payload.access_token === "string") {
+          return payload.access_token;
+        }
+        if (payload.data) {
+          return parseTokenFromResponse(payload.data);
+        }
+        return null;
+      };
+
+      const resolveTokenExpiry = (payload) => {
+        const nested = payload && payload.data ? payload.data : payload;
+        const expiresField =
+          nested &&
+          (nested.expiresIn ?? nested.expires_in ?? nested.expires ?? null);
+        if (Number.isFinite(expiresField)) {
+          const expiresInMs = Number(expiresField) * 1000;
+          return Date.now() + expiresInMs;
+        }
+        return Date.now() + 15 * 60 * 1000;
+      };
+
+      const resetPic2bimAuth = () => {
+        pic2bimAuthState.token = null;
+        pic2bimAuthState.expiresAt = 0;
+      };
+
+      const requestPic2bimToken = async () => {
+        const credentials = getPic2bimCredentials();
+        if (!credentials) {
+          setBuildingStatus(
+            "Missing pic2bim credentials. Create pic2bim-credentials.local.js.",
+            { isError: true },
+          );
+          return null;
+        }
+
+        const response = await fetch(`${PIC2BIM_DOMAIN}${PIC2BIM_LOGIN_PATH}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(credentials),
+        });
+
+        if (!response.ok) {
+          resetPic2bimAuth();
+          throw new Error(
+            `Login failed (${response.status}: ${response.statusText}).`,
+          );
+        }
+
+        const payload = await response.json().catch(() => null);
+        const token = parseTokenFromResponse(payload);
+        if (!token) {
+          resetPic2bimAuth();
+          throw new Error("No bearer token returned by login endpoint.");
+        }
+
+        const expiresAt = resolveTokenExpiry(payload);
+        pic2bimAuthState.token = token;
+        pic2bimAuthState.expiresAt = expiresAt;
+        return token;
+      };
+
+      const ensurePic2bimToken = async () => {
+        const now = Date.now();
+        if (
+          pic2bimAuthState.token &&
+          pic2bimAuthState.expiresAt - PIC2BIM_TOKEN_BUFFER_MS > now
+        ) {
+          return pic2bimAuthState.token;
+        }
+        return requestPic2bimToken();
+      };
+
+      const normalizeLongitude = (value) => {
+        const longitude = Number.parseFloat(value);
+        if (!Number.isFinite(longitude)) {
+          return value;
+        }
+        return longitude > 0 ? -Math.abs(longitude) : longitude;
+      };
+
+      const parseGeojson = (candidate) => {
+        if (!candidate) {
+          return null;
+        }
+        if (typeof candidate === "string") {
+          try {
+            return JSON.parse(candidate);
+          } catch (error) {
+            console.error("Unable to parse GeoJSON string", error);
+            return null;
+          }
+        }
+        if (candidate.type) {
+          return candidate;
+        }
+        return null;
+      };
+
+      const resolveBuildingCandidate = (payload) => {
+        if (!payload) {
+          return null;
+        }
+        if (Array.isArray(payload)) {
+          for (const item of payload) {
+            const candidate = resolveBuildingCandidate(item);
+            if (candidate) {
+              return candidate;
+            }
+          }
+          return null;
+        }
+        if (payload.geojson) {
+          return payload;
+        }
+        if (payload.building_part) {
+          return resolveBuildingCandidate(payload.building_part);
+        }
+        if (payload.data) {
+          return resolveBuildingCandidate(payload.data);
+        }
+        if (payload.result) {
+          return resolveBuildingCandidate(payload.result);
+        }
+        if (payload.type && payload.features) {
+          return { geojson: payload };
+        }
+        return null;
+      };
+
+      const parseBuildingResponse = (payload) => {
+        const candidate = resolveBuildingCandidate(payload);
+        if (!candidate) {
+          return null;
+        }
+
+        const geojson = parseGeojson(candidate.geojson ?? candidate.geometry);
+        if (!geojson) {
+          return null;
+        }
+
+        const cameraSource = candidate.cameraGPSData || candidate.camera;
+        const cameraArray = Array.isArray(cameraSource)
+          ? cameraSource
+          : cameraSource
+            ? [cameraSource]
+            : [];
+
+        return {
+          geojson,
+          cameraGPSData: cameraArray,
+          properties: candidate.properties ?? candidate.attributes ?? null,
+        };
+      };
+
+      const fetchPic2bimBuilding = async ({ latitude, longitude, bearing }) => {
+        const token = await ensurePic2bimToken();
+        if (!token) {
+          throw new Error(
+            "Unable to authenticate with pic2bim. Verify local credentials.",
+          );
+        }
+
+        const normalizedLongitude = normalizeLongitude(longitude);
+        const searchParams = new URLSearchParams({
+          latitude: `${Number.parseFloat(latitude)}`,
+          longitude: `${normalizedLongitude}`,
+        });
+        if (Number.isFinite(Number.parseFloat(bearing))) {
+          searchParams.set("imagedirection", `${Number.parseFloat(bearing)}`);
+        }
+
+        const response = await fetch(
+          `${PIC2BIM_DOMAIN}${PIC2BIM_BUILDING_PATH}?${searchParams.toString()}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          },
+        );
+
+        if (response.status === 401 || response.status === 403) {
+          resetPic2bimAuth();
+          throw new Error(
+            "Authentication was rejected for the building request.",
+          );
+        }
+
+        if (!response.ok) {
+          throw new Error(
+            `Building request failed (${response.status}: ${response.statusText}).`,
+          );
+        }
+
+        const payload = await response.json().catch(() => null);
+        const parsed = parseBuildingResponse(payload);
+        if (!parsed) {
+          return null;
+        }
+
+        return parsed;
+      };
+
+      const focusMapOnCamera = (cameraData) => {
+        if (!cameraData) {
+          return;
+        }
+
+        const [lng, lat, altitude] = Array.isArray(cameraData.coordinates)
+          ? cameraData.coordinates
+          : [];
+        if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+          return;
+        }
+
+        const targetZoom = Math.max(map.getZoom(), 18);
+        const targetBearing = Number.isFinite(cameraData.bearing)
+          ? cameraData.bearing
+          : map.getBearing();
+        const targetPitch = Number.isFinite(cameraData.pitch)
+          ? clampPitch(cameraData.pitch)
+          : clampPitch(map.getPitch());
+
+        map.jumpTo({
+          center: [lng, lat],
+          bearing: targetBearing,
+          pitch: targetPitch,
+          zoom: targetZoom,
+        });
+
+        if (Number.isFinite(altitude)) {
+          lastDeckViewState.position = normalizePosition(
+            [0, 0, altitude],
+            altitude,
+          );
+        }
+
+        syncDeckFromMap();
+      };
+
+      const handleBuildingFetch = async () => {
+        if (!fetchBuildingButton) {
+          return;
+        }
+
+        fetchBuildingButton.disabled = true;
+        setBuildingStatus("Fetching building data…");
+
+        try {
+          const state = cloneViewState(lastDeckViewState);
+          const result = await fetchPic2bimBuilding({
+            latitude: state.latitude,
+            longitude: state.longitude,
+            bearing: state.bearing,
+          });
+
+          if (!result) {
+            currentBuildingLayer = null;
+            updateDeckLayers();
+            setBuildingStatus(
+              "No building data available for the current view.",
+              { isError: true },
+            );
+            return;
+          }
+
+          const bounds = await terrainConfigPromise;
+          const terrainConfig = createTerrainExtensionConfig(bounds);
+          currentBuildingLayer = createBuildingLayer(
+            result.geojson,
+            terrainConfig,
+          );
+          updateDeckLayers();
+
+          const featureName =
+            result.geojson?.features?.[0]?.properties?.name ??
+            result.geojson?.properties?.name ??
+            "Building";
+          setBuildingStatus(`Loaded building data for ${featureName}.`);
+
+          if (Array.isArray(result.cameraGPSData) && result.cameraGPSData[0]) {
+            focusMapOnCamera(result.cameraGPSData[0]);
+          }
+        } catch (error) {
+          console.error("Building fetch failed", error);
+          setBuildingStatus(
+            error instanceof Error ? error.message : "Building fetch failed.",
+            { isError: true },
+          );
+        } finally {
+          fetchBuildingButton.disabled = false;
+        }
+      };
+
       const mapElement = document.getElementById("map");
       const deckContainer = document.createElement("div");
       deckContainer.id = "deck-overlay";
       deckContainer.style.touchAction = "none";
       mapElement.append(deckContainer);
 
-      const tooltipFormatter = (feature) =>
-        feature
-          ? `Trail: ${feature.properties?.name ?? "Heritage Trail"}`
-          : null;
+      const buildingLayerId = "pic2bim-building";
+
+      const tooltipFormatter = (info) => {
+        const feature = info?.object;
+        if (!feature) {
+          return null;
+        }
+
+        const layerId = info?.layer?.id;
+        if (layerId === buildingLayerId) {
+          const properties = feature.properties ?? {};
+          const name =
+            properties.name ||
+            properties.ref ||
+            properties["addr:housename"] ||
+            "Building";
+          const height =
+            properties.height ??
+            properties.relativeheightmaximum ??
+            properties["building:height"] ??
+            null;
+          const levels =
+            properties.building_levels ??
+            properties.levels ??
+            properties["building:levels"] ??
+            null;
+          const details = [`Building: ${name}`];
+          if (height) {
+            details.push(`Height: ${height}m`);
+          }
+          if (levels) {
+            details.push(`Levels: ${levels}`);
+          }
+          return details.join("\n");
+        }
+
+        if (layerId === trailLayerProps.id) {
+          return `Trail: ${feature.properties?.name ?? "Heritage Trail"}`;
+        }
+
+        return null;
+      };
 
       const firstPersonViewId = "first-person-view";
       const pitchLimits = { min: 0, max: 85 };
@@ -209,7 +643,29 @@
       let syncingFromDeck = false;
       let syncingFromMap = false;
 
-      const deckInstance = new Deck({
+      let deckInstance;
+      let currentTrailLayer = null;
+      let currentBuildingLayer = null;
+
+      const gatherActiveLayers = () => {
+        const layers = [];
+        if (currentTrailLayer) {
+          layers.push(currentTrailLayer);
+        }
+        if (currentBuildingLayer) {
+          layers.push(currentBuildingLayer);
+        }
+        return layers;
+      };
+
+      const updateDeckLayers = () => {
+        if (!deckInstance) {
+          return;
+        }
+        deckInstance.setProps({ layers: gatherActiveLayers() });
+      };
+
+      deckInstance = new Deck({
         parent: deckContainer,
         views: [
           new FirstPersonView({
@@ -226,7 +682,7 @@
         initialViewState: wrapViewState(lastDeckViewState),
         viewState: wrapViewState(lastDeckViewState),
         layers: [],
-        getTooltip: ({ object }) => tooltipFormatter(object),
+        getTooltip: (info) => tooltipFormatter(info),
         onViewStateChange: ({ viewState, viewId }) => {
           if (syncingFromMap || viewId !== firstPersonViewId) {
             return;
@@ -279,6 +735,12 @@
       };
 
       map.on("move", syncDeckFromMap);
+
+      if (fetchBuildingButton) {
+        fetchBuildingButton.addEventListener("click", () => {
+          void handleBuildingFetch();
+        });
+      }
 
       const getPmtilesInstance = (() => {
         const cache = new Map();
@@ -402,6 +864,45 @@
           terrain: terrainConfig || undefined,
         });
 
+      const buildingLayerProps = {
+        id: buildingLayerId,
+        stroked: true,
+        filled: true,
+        extruded: true,
+        wireframe: true,
+        getFillColor: [59, 130, 246, 120],
+        getLineColor: [37, 99, 235, 255],
+        getElevation: (feature) => {
+          const properties = feature.properties ?? {};
+          const value =
+            properties.height ??
+            properties.relativeheightmaximum ??
+            properties["building:height"] ??
+            properties.levels ??
+            properties.building_levels ??
+            12;
+          const elevation = Number.parseFloat(value);
+          return Number.isFinite(elevation) ? elevation : 12;
+        },
+        lineWidthMinPixels: 1.5,
+        pickable: true,
+        autoHighlight: true,
+        highlightColor: [255, 255, 255, 200],
+        pointType: "circle",
+        getPointRadius: 8,
+        pointRadiusUnits: "pixels",
+        coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+        extensions: terrainExtension ? [terrainExtension] : [],
+        terrainDrawMode: "offset",
+      };
+
+      const createBuildingLayer = (data, terrainConfig) =>
+        new GeoJsonLayer({
+          ...buildingLayerProps,
+          data,
+          terrain: terrainConfig || undefined,
+        });
+
       map.on("load", () => {
         disableMapGestures();
         map.getCanvas().style.pointerEvents = "none";
@@ -449,9 +950,8 @@
             const geojson = await response.json();
             const terrainConfig = createTerrainExtensionConfig(bounds);
 
-            deckInstance.setProps({
-              layers: [createTrailLayer(geojson, terrainConfig)],
-            });
+            currentTrailLayer = createTrailLayer(geojson, terrainConfig);
+            updateDeckLayers();
           } catch (error) {
             console.error(
               "Unable to initialize the heritage trail layer",
