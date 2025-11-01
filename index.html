@@ -203,44 +203,23 @@
         return pmtilesImageResponse(tile);
       };
 
-      const createTerrainLayer = () => {
-        if (typeof deck.TerrainLayer !== "function") {
-          console.warn(
-            "Deck TerrainLayer is unavailable in the current build.",
-          );
-          return null;
-        }
-
-        return new deck.TerrainLayer({
-          id: "pmtiles-terrain",
-          elevationData: `pmtiles://${pmtilesUrl}/{z}/{x}/{y}`,
-          texture: null,
-          meshMaxError: 3,
-          elevationDecoder: {
-            rScaler: 6553.6,
-            gScaler: 25.6,
-            bScaler: 0.1,
-            offset: -10000,
-          },
-          minZoom: 5,
-          maxZoom: 15,
-          refinementStrategy: "no-overlap",
-          operation: "terrain",
-          fetch: pmtilesFetch,
-          loadOptions: {
-            terrain: {
-              skirtHeight: 15,
+      const terrainConfig = terrainExtension
+        ? {
+            elevationData: `pmtiles://${pmtilesUrl}/{z}/{x}/{y}`,
+            texture: null,
+            elevationDecoder: {
+              rScaler: 6553.6,
+              gScaler: 25.6,
+              bScaler: 0.1,
+              offset: -10000,
             },
-          },
-        });
-      };
-
-      const terrainLayer = createTerrainLayer();
-
-      const baseDeckLayers = terrainLayer ? [terrainLayer] : [];
-      if (baseDeckLayers.length > 0) {
-        deckgl.setProps({ layers: baseDeckLayers });
-      }
+            bounds: [-180, -85.05113, 180, 85.05113],
+            fetch: pmtilesFetch,
+            minZoom: 5,
+            maxZoom: 15,
+            skirtHeight: 15,
+          }
+        : null;
 
       const trailLayerProps = {
         id: "heritage-trail",
@@ -256,6 +235,7 @@
         coordinateSystem: deck.COORDINATE_SYSTEM.CARTESIAN,
         extensions: terrainExtension ? [terrainExtension] : [],
         terrainDrawMode: "offset",
+        terrain: terrainConfig || undefined,
         getElevation: (feature) => (feature.geometry.type === "Point" ? 12 : 6),
       };
 
@@ -388,7 +368,7 @@
             const mercatorGeojson = convertFeatureCollectionToMercator(geojson);
 
             deckgl.setProps({
-              layers: [...baseDeckLayers, createTrailLayer(mercatorGeojson)],
+              layers: [createTrailLayer(mercatorGeojson)],
             });
             deckReady = true;
             syncDeckViewState();
