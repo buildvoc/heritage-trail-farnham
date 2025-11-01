@@ -27,6 +27,20 @@
         bottom: 0;
         width: 100%;
       }
+
+      #deck-tooltip {
+        position: absolute;
+        z-index: 2;
+        pointer-events: none;
+        background: rgba(0, 0, 0, 0.75);
+        color: #ffffff;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        white-space: nowrap;
+        transform: translate(-50%, calc(-100% - 8px));
+        display: none;
+      }
     </style>
   </head>
   <body>
@@ -37,6 +51,7 @@
       const pmtilesUrl = "output.pmtiles";
       const pmtilesSource = new pmtiles.PMTiles(pmtilesUrl);
       protocol.add(pmtilesSource);
+
       const map = new maplibregl.Map({
         style: "https://tiles.openfreemap.org/styles/liberty",
         container: "map", // container id
@@ -48,11 +63,84 @@
         maxZoom: 20,
       });
 
-      const deckOverlay = new deck.MapboxOverlay({
-        interleaved: true,
+      const mapContainer = document.getElementById("map");
+
+      const deckCanvas = document.createElement("canvas");
+      deckCanvas.id = "deck-canvas";
+      deckCanvas.style.position = "absolute";
+      deckCanvas.style.top = "0";
+      deckCanvas.style.left = "0";
+      deckCanvas.style.width = "100%";
+      deckCanvas.style.height = "100%";
+      deckCanvas.style.pointerEvents = "none";
+      mapContainer.appendChild(deckCanvas);
+
+      const tooltip = document.createElement("div");
+      tooltip.id = "deck-tooltip";
+      mapContainer.appendChild(tooltip);
+
+      const deckgl = new deck.Deck({
+        canvas: deckCanvas,
+        width: "100%",
+        height: "100%",
+        controller: false,
+        views: [
+          new deck.OrbitView({
+            id: "orbit-view",
+            fov: 50,
+          }),
+        ],
+        layers: [],
       });
 
-      map.addControl(deckOverlay);
+      const trailLayerProps = {
+        id: "heritage-trail",
+        data: "LAD_Waverley_active-travel-heritage-trail-farnham.geojson",
+        lineWidthScale: 2,
+        lineWidthUnits: "pixels",
+        getLineColor: [255, 0, 0],
+        getLineWidth: 6,
+        pickable: true,
+        highlightedObjectIndex: -1,
+        highlightColor: [255, 255, 0, 180],
+        parameters: {
+          depthTest: false,
+        },
+        coordinateSystem: deck.COORDINATE_SYSTEM.LNGLAT,
+      };
+
+      let trailLayer = null;
+      let highlightedIndex = -1;
+      let deckReady = false;
+
+      const currentOrbitViewState = () => {
+        const center = map.getCenter();
+        return {
+          target: [center.lng, center.lat, 0],
+          rotationOrbit: map.getBearing(),
+          rotationX: map.getPitch(),
+          zoom: map.getZoom(),
+          minZoom: map.getMinZoom(),
+          maxZoom: map.getMaxZoom(),
+        };
+      };
+
+      const applyTrailLayer = (newHighlight = highlightedIndex) => {
+        highlightedIndex = newHighlight;
+        trailLayer = new deck.GeoJsonLayer({
+          ...trailLayerProps,
+          highlightedObjectIndex: highlightedIndex,
+        });
+        deckgl.setProps({
+          layers: [trailLayer],
+        });
+      };
+
+      const syncDeckViewState = () => {
+        deckgl.setProps({
+          viewState: currentOrbitViewState(),
+        });
+      };
 
       map.on("load", () => {
         map.addSource("terrainSource", {
@@ -84,32 +172,65 @@
           }),
         );
 
-        deckOverlay.setProps({
-          layers: [
-            new deck.GeoJsonLayer({
-              id: "heritage-trail",
-              data: "LAD_Waverley_active-travel-heritage-trail-farnham.geojson",
-              lineWidthScale: 2,
-              lineWidthUnits: "pixels",
-              getLineColor: [255, 0, 0],
-              getLineWidth: 6,
-              pickable: true,
-              autoHighlight: true,
-              highlightColor: [255, 255, 0, 180],
-              parameters: {
-                depthTest: false,
-              },
-              getTooltip: ({ object }) => {
-                if (!object) {
-                  return null;
-                }
+        applyTrailLayer();
+        syncDeckViewState();
+        deckReady = true;
+      });
 
-                const name = object.properties?.Name;
-                return name ? `Trail: ${name}` : "Heritage Trail";
-              },
-            }),
-          ],
+      map.on("render", () => {
+        if (!deckReady) {
+          return;
+        }
+
+        syncDeckViewState();
+      });
+
+      map.on("resize", () => {
+        deckgl.resize();
+      });
+
+      map.on("mousemove", (event) => {
+        if (!deckReady) {
+          return;
+        }
+
+        const pickInfo = deckgl.pickObject({
+          x: event.point.x,
+          y: event.point.y,
+          layerIds: ["heritage-trail"],
         });
+
+        if (pickInfo && pickInfo.index !== highlightedIndex) {
+          applyTrailLayer(pickInfo.index);
+        } else if (!pickInfo && highlightedIndex !== -1) {
+          applyTrailLayer(-1);
+        }
+
+        if (pickInfo && pickInfo.object) {
+          const name = pickInfo.object.properties?.Name;
+          tooltip.textContent = name ? `Trail: ${name}` : "Heritage Trail";
+          tooltip.style.display = "block";
+          tooltip.style.left = `${event.point.x}px`;
+          tooltip.style.top = `${event.point.y}px`;
+        } else {
+          tooltip.style.display = "none";
+        }
+      });
+
+      map.getCanvasContainer().addEventListener("mouseleave", () => {
+        if (!deckReady) {
+          return;
+        }
+
+        if (highlightedIndex !== -1) {
+          applyTrailLayer(-1);
+        }
+
+        tooltip.style.display = "none";
+      });
+
+      map.on("remove", () => {
+        deckgl.finalize();
       });
 
       map.addControl(
