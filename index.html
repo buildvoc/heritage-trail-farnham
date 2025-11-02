@@ -240,6 +240,11 @@
     <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
     <script src="https://unpkg.com/deck.gl@9.2.2/dist.min.js"></script>
     <script src="https://unpkg.com/@deck.gl/widgets@9.2.2/dist.min.js"></script>
+    <script>
+      if (window.deck && !window.deck.widgets && window.deckWidgets) {
+        window.deck.widgets = window.deckWidgets;
+      }
+    </script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
     <script>
       const PLAYGROUND_JSON_URL =
@@ -309,13 +314,15 @@
       }
 
       function createWidgets(widgetConfigs = []) {
-        if (!window.deck || !deck.widgets) {
+        const widgetRegistry =
+          (window.deck && window.deck.widgets) || window.deckWidgets || null;
+        if (!widgetRegistry) {
           return [];
         }
         const instances = [];
         for (const widgetConfig of widgetConfigs) {
           const typeName = widgetConfig["@@type"];
-          const WidgetCtor = deck.widgets[typeName];
+          const WidgetCtor = widgetRegistry[typeName];
           if (typeof WidgetCtor !== "function") {
             continue;
           }
