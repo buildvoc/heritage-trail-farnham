@@ -3,23 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Display a 3D Map</title>
-    <link
-      rel="stylesheet"
-      href="https://unpkg.com/maplibre-gl@5.0.0/dist/maplibre-gl.css"
-      crossorigin="anonymous"
-    />
-    <script
-      src="https://unpkg.com/maplibre-gl@5.0.0/dist/maplibre-gl.js"
-      crossorigin="anonymous"
-    ></script>
-    <script src="https://unpkg.com/pmtiles@4.1.0/dist/pmtiles.js"></script>
-    <script src="vendor/deck.gl@9.2.2/deck.gl.min.js"></script>
-    <script src="vendor/deck.gl-widgets@9.2.2/deck.gl-widgets.min.js"></script>
+    <title>Deck.gl Building Preview</title>
     <link
       rel="stylesheet"
       href="vendor/deck.gl-widgets@9.2.2/deck.gl-widgets.min.css"
     />
+    <script src="vendor/deck.gl@9.2.2/deck.gl.min.js"></script>
+    <script src="vendor/deck.gl-widgets@9.2.2/deck.gl-widgets.min.js"></script>
     <script>
       if (window.deck && window.deckWidgets) {
         window.deck.widgets = window.deckWidgets;
@@ -34,60 +24,15 @@
     -->
     <script src="pic2bim-credentials.local.js" defer></script>
     <style>
+      :root {
+        color-scheme: dark;
+      }
+
+      html,
       body {
         margin: 0;
-        padding: 0;
-      }
-
-      #map {
-        position: absolute;
-        top: 0;
-        bottom: 0;
-        width: 100%;
-      }
-
-      #map-inset {
-        position: absolute;
-        top: 16px;
-        right: 16px;
-        width: min(320px, 35vw);
-        height: min(240px, 35vh);
-        border: 2px solid rgba(31, 41, 55, 0.85);
-        border-radius: 12px;
-        overflow: hidden;
-        z-index: 8;
-        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
-        background-color: rgba(17, 24, 39, 0.85);
-      }
-
-      #map-inset canvas {
-        border-radius: 10px;
-      }
-
-      #deck-overlay {
-        position: absolute;
-        inset: 0;
-        z-index: 5;
-        pointer-events: auto;
-      }
-
-      .maplibregl-ctrl-top-right {
-        z-index: 6;
-      }
-
-      #building-controls {
-        position: absolute;
-        top: 12px;
-        left: 12px;
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        padding: 12px;
-        border-radius: 8px;
-        background-color: rgba(17, 24, 39, 0.75);
-        color: #f3f4f6;
-        z-index: 9;
-        max-width: min(320px, 80vw);
+        height: 100%;
+        background-color: #0f172a;
         font-family:
           system-ui,
           -apple-system,
@@ -96,15 +41,37 @@
           sans-serif;
       }
 
+      #deck-container {
+        position: absolute;
+        inset: 0;
+      }
+
+      #building-controls {
+        position: absolute;
+        top: 16px;
+        left: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 14px 16px;
+        border-radius: 12px;
+        background-color: rgba(15, 23, 42, 0.85);
+        backdrop-filter: blur(6px);
+        color: #f8fafc;
+        max-width: min(340px, 80vw);
+        z-index: 5;
+        box-shadow: 0 18px 40px rgba(15, 23, 42, 0.35);
+      }
+
       #building-controls button {
-        padding: 8px 12px;
-        font-size: 0.95rem;
-        color: #111827;
-        background-color: #fbbf24;
+        padding: 10px 14px;
         border: none;
         border-radius: 6px;
-        cursor: pointer;
+        font-size: 0.95rem;
         font-weight: 600;
+        color: #0f172a;
+        background-color: #fbbf24;
+        cursor: pointer;
       }
 
       #building-controls button:disabled {
@@ -112,1339 +79,421 @@
         cursor: progress;
       }
 
-      #building-controls label {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 0.9rem;
-      }
-
-      #building-controls input[type="checkbox"] {
-        width: 18px;
-        height: 18px;
-        accent-color: #fbbf24;
-      }
-
       #building-status {
         font-size: 0.85rem;
-        line-height: 1.2;
-        min-height: 1.2em;
+        line-height: 1.3;
+        min-height: 1.3em;
+        color: #bbf7d0;
       }
 
       #reset-view-widget {
-        margin-top: 4px;
-        min-height: 32px;
+        min-height: 36px;
       }
     </style>
   </head>
   <body>
-    <div id="map"></div>
-    <div id="map-inset" aria-label="Inset terrain map"></div>
+    <div id="deck-container" aria-label="deck.gl scene"></div>
     <div id="building-controls">
       <button id="fetch-building" type="button">
         Fetch nearest building (pic2bim API)
       </button>
-      <label for="toggle-basemap">
-        <input type="checkbox" id="toggle-basemap" name="toggle-basemap" />
-        Show basemap and terrain
-      </label>
       <div id="building-status" role="status" aria-live="polite"></div>
       <div id="reset-view-widget" aria-live="polite"></div>
     </div>
     <script>
-      const {
-        Deck,
-        FirstPersonController,
-        FirstPersonView,
-        MapController,
-        MapView,
-        PolygonLayer,
-        COORDINATE_SYSTEM,
-        _TerrainExtension,
-        TerrainExtension: PublicTerrainExtension,
-      } = deck;
+      (function () {
+        const {
+          Deck,
+          MapController,
+          MapView,
+          PolygonLayer,
+          COORDINATE_SYSTEM,
+        } = deck;
 
-      const {
-        fetchNearestBuilding,
-        normalizeBuildingFeatures,
-        parseBuildingHeight,
-      } = window.pic2bimBuilding ?? {};
-
-      if (!fetchNearestBuilding) {
-        console.warn(
-          "pic2bimBuilding helpers are unavailable; building fetches will fail.",
-        );
-      }
-
-      const fetchBuildingButton = document.getElementById("fetch-building");
-      const buildingStatusElement = document.getElementById("building-status");
-      const resetWidgetContainer = document.getElementById("reset-view-widget");
-
-      const setBuildingStatus = (message, options = {}) => {
-        if (!buildingStatusElement) {
-          return;
-        }
-        const { isError = false } = options;
-        buildingStatusElement.textContent = message;
-        buildingStatusElement.style.color = isError ? "#fca5a5" : "#bbf7d0";
-      };
-
-      setBuildingStatus("Loading bundled sample building footprint…");
-
-      const basemapToggle = document.getElementById("toggle-basemap");
-      const initialBasemapEnabled = false;
-      if (basemapToggle) {
-        basemapToggle.checked = initialBasemapEnabled;
-      }
-
-      const baseMapStyleUrl = "https://tiles.openfreemap.org/styles/liberty";
-      const createBlankStyle = () => ({
-        version: 8,
-        name: "Blank",
-        glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
-        sources: {},
-        layers: [],
-      });
-
-      let basemapEnabled = initialBasemapEnabled;
-      let currentBasemapMode = basemapEnabled ? "tiled" : "blank";
-
-      const protocol = new pmtiles.Protocol();
-      maplibregl.addProtocol("pmtiles", protocol.tile);
-      const pmtilesUrl = "output.pmtiles";
-      const pmtilesSource = new pmtiles.PMTiles(pmtilesUrl);
-      protocol.add(pmtilesSource);
-
-      const staticBuildingDataUrl =
-        "https://raw.githubusercontent.com/buildvoc/heritage-trail-farnham/main/osm_st_andrews_church_osm_2025_10_31.geojson";
-
-      const initialMapState = {
-        center: [-0.796, 51.214],
-        zoom: 16,
-        pitch: 61,
-        bearing: 0,
-      };
-
-      const map = new maplibregl.Map({
-        style: basemapEnabled ? baseMapStyleUrl : createBlankStyle(),
-        container: "map", // container id
-        center: initialMapState.center,
-        zoom: initialMapState.zoom,
-        pitch: initialMapState.pitch,
-        bearing: initialMapState.bearing,
-        maxPitch: 85,
-        maxZoom: 20,
-        interactive: false,
-      });
-
-      const insetMapElement = document.getElementById("map-inset");
-      const mapInset = insetMapElement
-        ? new maplibregl.Map({
-            container: insetMapElement,
-            style: "https://tiles.openfreemap.org/styles/liberty",
-            center: initialMapState.center,
-            zoom: initialMapState.zoom - 1,
-            pitch: 45,
-            bearing: initialMapState.bearing,
-            maxPitch: 85,
-            maxZoom: 20,
-            attributionControl: false,
-          })
-        : null;
-
-      /*
-       * https://deck.gl/docs/api-reference/extensions/terrain-extension
-       */
-      const TerrainExtension = PublicTerrainExtension || _TerrainExtension;
-      const terrainExtension = TerrainExtension
-        ? new TerrainExtension({ terrainDrawMode: "offset" })
-        : null;
-
-      const focusMapOnCamera = (cameraData) => {
-        if (!cameraData) {
-          return;
-        }
-
-        const [lng, lat, altitude] = Array.isArray(cameraData.coordinates)
-          ? cameraData.coordinates
-          : [];
-        if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
-          return;
-        }
-
-        const targetZoom = Math.max(map.getZoom(), 18);
-        const targetBearing = Number.isFinite(cameraData.bearing)
-          ? cameraData.bearing
-          : map.getBearing();
-        const targetPitch = Number.isFinite(cameraData.pitch)
-          ? clampPitch(cameraData.pitch)
-          : clampPitch(map.getPitch());
-
-        map.jumpTo({
-          center: [lng, lat],
-          bearing: targetBearing,
-          pitch: targetPitch,
-          zoom: targetZoom,
-        });
-
-        if (Number.isFinite(altitude)) {
-          const current = cloneViewStateForMode("firstPerson") ?? {};
-          setViewStateForMode("firstPerson", {
-            ...current,
-            position: [0, 0, altitude],
-          });
-        }
-
-        syncDeckFromMap();
-      };
-
-      const focusViewOnTarget = (target, options = {}) => {
-        if (!target) {
-          return;
-        }
-
-        const { longitude, latitude, altitude } = target;
-        if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) {
-          return;
-        }
-
-        const targetZoom = Number.isFinite(options.zoom)
-          ? options.zoom
-          : Math.max(map.getZoom(), 18);
-        const targetBearing = Number.isFinite(options.bearing)
-          ? options.bearing
-          : map.getBearing();
-        const targetPitch = Number.isFinite(options.pitch)
-          ? clampPitch(options.pitch)
-          : clampPitch(map.getPitch());
-
-        map.jumpTo({
-          center: [longitude, latitude],
-          zoom: targetZoom,
-          bearing: targetBearing,
-          pitch: targetPitch,
-        });
-
-        let targetAltitude = Number.isFinite(altitude) ? altitude : null;
-        if (!Number.isFinite(targetAltitude)) {
-          const previousFirstPerson = cloneViewStateForMode("firstPerson");
-          const previousAltitude = Number.isFinite(
-            previousFirstPerson?.position?.[2],
-          )
-            ? previousFirstPerson.position[2]
-            : getCameraAltitude();
-          targetAltitude = Number.isFinite(previousAltitude)
-            ? previousAltitude
+        const helperNamespace = window.pic2bimBuilding ?? {};
+        const fetchNearestBuilding =
+          typeof helperNamespace.fetchNearestBuilding === "function"
+            ? helperNamespace.fetchNearestBuilding
             : null;
-        }
+        const normalizeBuildingFeatures =
+          typeof helperNamespace.normalizeBuildingFeatures === "function"
+            ? helperNamespace.normalizeBuildingFeatures
+            : () => [];
+        const parseBuildingHeight =
+          typeof helperNamespace.parseBuildingHeight === "function"
+            ? helperNamespace.parseBuildingHeight
+            : () => 12;
 
-        if (!Number.isFinite(targetAltitude) || targetAltitude <= 0) {
-          targetAltitude = 20;
-        }
+        const deckContainer = document.getElementById("deck-container");
+        const fetchButton = document.getElementById("fetch-building");
+        const statusElement = document.getElementById("building-status");
+        const widgetContainer = document.getElementById("reset-view-widget");
 
-        const currentFirstPerson = cloneViewStateForMode("firstPerson") ?? {};
-        setViewStateForMode("firstPerson", {
-          ...currentFirstPerson,
-          position: [0, 0, targetAltitude],
-        });
+        const mainViewId = "deck-main-view";
+        const staticBuildingDataUrl =
+          "https://raw.githubusercontent.com/buildvoc/heritage-trail-farnham/main/osm_st_andrews_church_osm_2025_10_31.geojson";
 
-        syncDeckFromMap();
-      };
+        const initialViewState = {
+          longitude: -0.79502,
+          latitude: 51.21699,
+          zoom: 18.25,
+          pitch: 60,
+          bearing: 24,
+        };
 
-      const handleBuildingFetch = async () => {
-        if (!fetchBuildingButton) {
-          return;
-        }
+        let deckViewState = { ...initialViewState };
+        const keyedInitialViewState = { [mainViewId]: { ...deckViewState } };
+        let currentBuildingLayer = null;
+        let resetWidget = null;
+        let deckInstance = null;
 
-        fetchBuildingButton.disabled = true;
-        setBuildingStatus("Fetching building data…");
-
-        try {
-          if (typeof fetchNearestBuilding !== "function") {
-            throw new Error("Building fetch helpers are unavailable.");
-          }
-          const state =
-            cloneViewStateForMode(currentViewMode) ??
-            cloneViewStateForMode("firstPerson");
-          const fallbackCenter = map.getCenter();
-          const result = await fetchNearestBuilding({
-            latitude: Number.isFinite(state?.latitude)
-              ? state.latitude
-              : fallbackCenter.lat,
-            longitude: Number.isFinite(state?.longitude)
-              ? state.longitude
-              : fallbackCenter.lng,
-            bearing: Number.isFinite(state?.bearing)
-              ? state.bearing
-              : map.getBearing(),
-          });
-
-          if (!result) {
-            currentBuildingLayer = null;
-            updateDeckLayers();
-            setBuildingStatus(
-              "No building data available for the current view.",
-              { isError: true },
-            );
+        const setStatus = (message, { isError = false } = {}) => {
+          if (!statusElement) {
             return;
           }
+          statusElement.textContent = message;
+          statusElement.style.color = isError ? "#fca5a5" : "#bbf7d0";
+        };
 
-          const bounds = await terrainConfigPromise;
-          const terrainConfig = createTerrainExtensionConfig(bounds);
-          const { layer: nextBuildingLayer, focusTarget } =
-            prepareBuildingLayer(result.geojson, terrainConfig);
+        const buildingLayerId = "pic2bim-building";
 
-          if (!nextBuildingLayer) {
-            currentBuildingLayer = null;
-            updateDeckLayers();
-            setBuildingStatus(
-              "No polygon geometry returned for the nearest building.",
-              { isError: true },
-            );
-            return;
+        const tooltipFormatter = (info) => {
+          const feature = info?.object;
+          if (!feature || info.layer?.id !== buildingLayerId) {
+            return null;
           }
-
-          currentBuildingLayer = nextBuildingLayer;
-          updateDeckLayers();
-
-          const featureName =
-            result.geojson?.features?.[0]?.properties?.name ??
-            result.geojson?.properties?.name ??
-            "Building";
-          setBuildingStatus(`Loaded building data for ${featureName}.`);
-
-          let cameraApplied = false;
-          if (Array.isArray(result.cameraGPSData) && result.cameraGPSData[0]) {
-            focusMapOnCamera(result.cameraGPSData[0]);
-            cameraApplied = true;
-          }
-
-          if (!cameraApplied && focusTarget) {
-            focusViewOnTarget(focusTarget);
-          }
-        } catch (error) {
-          console.error("Building fetch failed", error);
-          setBuildingStatus(
-            error instanceof Error ? error.message : "Building fetch failed.",
-            { isError: true },
-          );
-        } finally {
-          fetchBuildingButton.disabled = false;
-        }
-      };
-
-      const loadSampleBuildingLayer = async () => {
-        try {
-          const [bounds, response] = await Promise.all([
-            terrainConfigPromise,
-            fetch(staticBuildingDataUrl),
-          ]);
-
-          if (!response.ok) {
-            throw new Error(
-              `Failed to load sample building data: ${response.status}`,
-            );
-          }
-
-          const geojson = await response.json();
-          const terrainConfig = createTerrainExtensionConfig(bounds);
-          const { layer: nextBuildingLayer, focusTarget } =
-            prepareBuildingLayer(geojson, terrainConfig);
-
-          if (!nextBuildingLayer) {
-            currentBuildingLayer = null;
-            updateDeckLayers();
-            setBuildingStatus(
-              "Bundled sample building file did not contain polygon geometry.",
-              { isError: true },
-            );
-            return;
-          }
-
-          currentBuildingLayer = nextBuildingLayer;
-          updateDeckLayers();
-          setBuildingStatus(
-            "Loaded bundled sample building footprint. Provide pic2bim credentials locally to fetch live buildings.",
-          );
-
-          if (focusTarget) {
-            focusViewOnTarget(focusTarget, { zoom: 18 });
-          }
-        } catch (error) {
-          console.error(
-            "Unable to load bundled sample building footprint",
-            error,
-          );
-          setBuildingStatus(
-            "Unable to load bundled sample building footprint. Provide pic2bim credentials locally to fetch live buildings.",
-            { isError: true },
-          );
-        }
-      };
-
-      const mapElement = document.getElementById("map");
-      const deckContainer = document.createElement("div");
-      deckContainer.id = "deck-overlay";
-      deckContainer.style.touchAction = "none";
-      mapElement.append(deckContainer);
-
-      const buildingLayerId = "pic2bim-building";
-
-      const tooltipFormatter = (info) => {
-        const feature = info?.object;
-        if (!feature) {
-          return null;
-        }
-
-        const layerId = info?.layer?.id;
-        if (layerId === buildingLayerId) {
           const properties = feature.properties ?? {};
           const name =
             properties.name ||
             properties.ref ||
             properties["addr:housename"] ||
             "Building";
-          const rawHeight =
-            properties.relativeheightmaximum ??
-            properties.relativeHeightMaximum ??
-            properties.height ??
-            properties["building:height"] ??
-            null;
-          const height =
-            rawHeight != null ? parseBuildingHeight(properties) : null;
+          const height = parseBuildingHeight(properties);
           const levels =
-            properties.building_levels ??
-            properties.levels ??
-            properties["building:levels"] ??
-            null;
+            properties.building_levels ||
+            properties.levels ||
+            properties["building:levels"];
           const details = [`Building: ${name}`];
           if (Number.isFinite(height)) {
-            const formattedHeight = Math.round(height * 100) / 100;
-            details.push(`Height: ${formattedHeight}m`);
+            details.push(`Height: ${Math.round(height * 100) / 100} m`);
           }
           if (levels) {
             details.push(`Levels: ${levels}`);
           }
           return details.join("\n");
-        }
-
-        return null;
-      };
-
-      const viewModeIds = {
-        firstPerson: "first-person-view",
-        map: "map-view",
-        orthographic: "orthographic-view",
-      };
-
-      const cloneStateEntry = (state) => {
-        if (!state) {
-          return null;
-        }
-
-        const clone = {
-          longitude: state.longitude,
-          latitude: state.latitude,
-          bearing: state.bearing,
-          pitch: state.pitch,
-          zoom: state.zoom,
         };
 
-        if (Array.isArray(state.position)) {
-          clone.position = [...state.position];
-        }
+        const clampZoom = (value) => {
+          const number = Number(value);
+          if (!Number.isFinite(number)) {
+            return deckViewState.zoom;
+          }
+          return Math.min(Math.max(number, 0), 22);
+        };
 
-        return clone;
-      };
+        const accumulateBounds = (bounds, coordinates) => {
+          if (!coordinates) {
+            return bounds;
+          }
+          if (typeof coordinates[0] === "number") {
+            const [lng, lat] = coordinates;
+            if (Number.isFinite(lng) && Number.isFinite(lat)) {
+              bounds.minLng = Math.min(bounds.minLng, lng);
+              bounds.maxLng = Math.max(bounds.maxLng, lng);
+              bounds.minLat = Math.min(bounds.minLat, lat);
+              bounds.maxLat = Math.max(bounds.maxLat, lat);
+            }
+            return bounds;
+          }
+          for (const entry of coordinates) {
+            accumulateBounds(bounds, entry);
+          }
+          return bounds;
+        };
 
-      const wrapViewStateFromStore = (mode, store) => {
-        const viewId = viewModeIds[mode] ?? viewModeIds.firstPerson;
-        const entry = cloneStateEntry(store?.[mode]);
-        return entry ? { [viewId]: entry } : {};
-      };
+        const computeFeatureBounds = (features) => {
+          const bounds = {
+            minLng: Number.POSITIVE_INFINITY,
+            maxLng: Number.NEGATIVE_INFINITY,
+            minLat: Number.POSITIVE_INFINITY,
+            maxLat: Number.NEGATIVE_INFINITY,
+          };
+          for (const feature of features) {
+            accumulateBounds(bounds, feature?.geometry?.coordinates);
+          }
+          if (
+            !Number.isFinite(bounds.minLng) ||
+            !Number.isFinite(bounds.maxLng) ||
+            !Number.isFinite(bounds.minLat) ||
+            !Number.isFinite(bounds.maxLat)
+          ) {
+            return null;
+          }
+          return bounds;
+        };
 
-      const pitchLimits = { min: 0, max: 85 };
-      const fallbackCameraAltitude = 120;
-      let freeCameraWarningLogged = false;
+        const prepareBuildingLayer = (geojson) => {
+          const features = normalizeBuildingFeatures(geojson);
+          if (!Array.isArray(features) || features.length === 0) {
+            return { layer: null, focusTarget: null };
+          }
+          const layer = new PolygonLayer({
+            id: buildingLayerId,
+            data: features,
+            extruded: true,
+            wireframe: true,
+            filled: true,
+            autoHighlight: true,
+            coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+            getPolygon: (feature) => feature?.geometry?.coordinates,
+            getElevation: (feature) =>
+              parseBuildingHeight(feature?.properties ?? {}),
+            getFillColor: [249, 115, 22, 140],
+            getLineColor: [255, 255, 255, 220],
+            lineWidthMinPixels: 1,
+            highlightColor: [59, 130, 246, 200],
+            material: {
+              ambient: 0.4,
+              diffuse: 0.6,
+              shininess: 32,
+            },
+            pickable: true,
+          });
 
-      const normalizeBearing = (value) => {
-        if (!Number.isFinite(value)) {
-          return 0;
-        }
-        const wrapped = ((value % 360) + 360) % 360;
-        return wrapped > 180 ? wrapped - 360 : wrapped;
-      };
+          const bounds = computeFeatureBounds(features);
+          if (!bounds) {
+            return { layer, focusTarget: null };
+          }
+          const focusTarget = {
+            longitude: (bounds.minLng + bounds.maxLng) / 2,
+            latitude: (bounds.minLat + bounds.maxLat) / 2,
+            zoom: Math.max(
+              deckViewState.zoom ?? initialViewState.zoom ?? 16,
+              18,
+            ),
+            bearing: deckViewState.bearing ?? initialViewState.bearing,
+            pitch: deckViewState.pitch ?? initialViewState.pitch,
+          };
+          return { layer, focusTarget };
+        };
 
-      const clampPitch = (value) =>
-        Math.max(
-          pitchLimits.min,
-          Math.min(pitchLimits.max, value ?? pitchLimits.min),
-        );
+        const updateDeckLayers = () => {
+          if (!deckInstance) {
+            return;
+          }
+          const layers = currentBuildingLayer ? [currentBuildingLayer] : [];
+          deckInstance.setProps({ layers });
+        };
 
-      const getCameraAltitude = () => {
-        if (typeof map.getFreeCameraOptions === "function") {
+        const syncViewState = () => {
+          if (!deckInstance) {
+            return;
+          }
+          const keyedState = { [mainViewId]: { ...deckViewState } };
+          deckInstance.setProps({ viewState: keyedState });
+          if (resetWidget && typeof resetWidget.setProps === "function") {
+            resetWidget.setProps({
+              viewId: mainViewId,
+              viewState: keyedState,
+              initialViewState: keyedInitialViewState,
+            });
+          }
+        };
+
+        const applyViewState = (updates = {}) => {
+          deckViewState = { ...deckViewState, ...updates };
+          syncViewState();
+        };
+
+        const focusOnTarget = (target) => {
+          if (!target) {
+            return;
+          }
+          const hasLngLat =
+            Number.isFinite(target.longitude) &&
+            Number.isFinite(target.latitude);
+          applyViewState({
+            longitude: hasLngLat ? target.longitude : deckViewState.longitude,
+            latitude: hasLngLat ? target.latitude : deckViewState.latitude,
+            zoom: clampZoom(target.zoom ?? deckViewState.zoom),
+            bearing: Number.isFinite(target.bearing)
+              ? target.bearing
+              : deckViewState.bearing,
+            pitch: Number.isFinite(target.pitch)
+              ? target.pitch
+              : deckViewState.pitch,
+          });
+        };
+
+        const ensureResetViewWidget = () => {
+          const widgetsNamespace = deck.widgets;
+          if (
+            !widgetsNamespace ||
+            typeof widgetsNamespace.ResetViewWidget !== "function"
+          ) {
+            console.warn(
+              "ResetViewWidget is unavailable in the current deck.gl build.",
+            );
+            return;
+          }
+          if (!widgetContainer) {
+            console.warn("ResetViewWidget container element is missing.");
+            return;
+          }
+          if (!resetWidget) {
+            resetWidget = new widgetsNamespace.ResetViewWidget({
+              container: widgetContainer,
+              viewId: mainViewId,
+              initialViewState: keyedInitialViewState,
+              label: "Reset view",
+            });
+          } else {
+            resetWidget.setProps({
+              container: widgetContainer,
+              viewId: mainViewId,
+              initialViewState: keyedInitialViewState,
+            });
+          }
+          if (deckInstance) {
+            deckInstance.setProps({ widgets: [resetWidget] });
+          }
+          syncViewState();
+        };
+
+        const loadSampleBuildingLayer = async () => {
+          setStatus("Loading sample building footprint…");
           try {
-            const freeCamera = map.getFreeCameraOptions();
-            const position = freeCamera?.position;
-            if (position && Number.isFinite(position[2])) {
-              return position[2];
+            const response = await fetch(staticBuildingDataUrl);
+            if (!response.ok) {
+              throw new Error(
+                `Failed to load sample dataset (${response.status}).`,
+              );
+            }
+            const geojson = await response.json();
+            const { layer, focusTarget } = prepareBuildingLayer(geojson);
+            if (!layer) {
+              currentBuildingLayer = null;
+              updateDeckLayers();
+              setStatus(
+                "Sample dataset did not contain polygon geometry for extrusion.",
+                { isError: true },
+              );
+              return;
+            }
+            currentBuildingLayer = layer;
+            updateDeckLayers();
+            setStatus(
+              "Loaded sample building footprint. Provide pic2bim credentials locally to fetch live buildings.",
+            );
+            if (focusTarget) {
+              focusOnTarget(focusTarget);
             }
           } catch (error) {
-            if (!freeCameraWarningLogged) {
-              console.warn("Unable to read free camera options", error);
-              freeCameraWarningLogged = true;
-            }
+            console.error(
+              "Unable to load the sample building footprint",
+              error,
+            );
+            currentBuildingLayer = null;
+            updateDeckLayers();
+            setStatus(
+              "Unable to load the sample building footprint. Provide pic2bim credentials locally to fetch live buildings.",
+              { isError: true },
+            );
           }
-        }
-
-        const cameraPosition = map?.transform?._camera?.position;
-        if (cameraPosition && Number.isFinite(cameraPosition[2])) {
-          return cameraPosition[2];
-        }
-
-        return fallbackCameraAltitude;
-      };
-
-      const normalizePosition = (position, altitudeFallback) => {
-        if (Array.isArray(position) && position.length === 3) {
-          return position.map((value, index) => {
-            if (!Number.isFinite(value)) {
-              if (index === 2) {
-                return altitudeFallback;
-              }
-              return 0;
-            }
-            return value;
-          });
-        }
-        return [0, 0, altitudeFallback];
-      };
-
-      const getMapDerivedBaseState = () => {
-        const center = map.getCenter();
-        return {
-          longitude: center.lng,
-          latitude: center.lat,
-          bearing: map.getBearing(),
-          pitch: clampPitch(map.getPitch()),
-          zoom: map.getZoom(),
-        };
-      };
-
-      const createInitialViewStates = () => {
-        const base = getMapDerivedBaseState();
-        const altitude = getCameraAltitude();
-        return {
-          firstPerson: {
-            ...base,
-            position: normalizePosition([0, 0, altitude], altitude),
-          },
-          map: { ...base },
-          orthographic: { ...base, pitch: 0 },
-        };
-      };
-
-      const viewIdToMode = Object.entries(viewModeIds).reduce(
-        (mapping, [mode, id]) => Object.assign(mapping, { [id]: mode }),
-        {},
-      );
-
-      const cloneViewStateForMode = (mode) => {
-        const existing = viewStateStore[mode];
-        if (!existing) {
-          return null;
-        }
-
-        const fallback = getMapDerivedBaseState();
-        const state = {
-          longitude: Number.isFinite(existing.longitude)
-            ? existing.longitude
-            : fallback.longitude,
-          latitude: Number.isFinite(existing.latitude)
-            ? existing.latitude
-            : fallback.latitude,
-          bearing: Number.isFinite(existing.bearing)
-            ? existing.bearing
-            : fallback.bearing,
-          pitch: clampPitch(
-            Number.isFinite(existing.pitch) ? existing.pitch : fallback.pitch,
-          ),
-          zoom: Number.isFinite(existing.zoom) ? existing.zoom : fallback.zoom,
         };
 
-        if (mode === "firstPerson") {
-          const altitudeFallback = Number.isFinite(existing.position?.[2])
-            ? existing.position[2]
-            : getCameraAltitude();
-          state.position = normalizePosition(
-            existing.position,
-            altitudeFallback,
-          );
-        } else if (Array.isArray(existing.position)) {
-          state.position = [...existing.position];
-        }
-
-        return state;
-      };
-
-      const wrapViewStateForMode = (mode) => {
-        const viewId = viewModeIds[mode] ?? viewModeIds.firstPerson;
-        const state = cloneViewStateForMode(mode);
-        const entry = cloneStateEntry(state);
-        return entry ? { [viewId]: entry } : {};
-      };
-
-      const setViewStateForMode = (mode, nextState) => {
-        const fallbackBase = getMapDerivedBaseState();
-        const previous = cloneViewStateForMode(mode) ?? fallbackBase;
-
-        let longitude = Number.isFinite(nextState?.longitude)
-          ? nextState.longitude
-          : Number.isFinite(previous?.longitude)
-            ? previous.longitude
-            : fallbackBase.longitude;
-        let latitude = Number.isFinite(nextState?.latitude)
-          ? nextState.latitude
-          : Number.isFinite(previous?.latitude)
-            ? previous.latitude
-            : fallbackBase.latitude;
-        let bearing = Number.isFinite(nextState?.bearing)
-          ? nextState.bearing
-          : Number.isFinite(previous?.bearing)
-            ? previous.bearing
-            : fallbackBase.bearing;
-        let pitch = clampPitch(
-          Number.isFinite(nextState?.pitch)
-            ? nextState.pitch
-            : Number.isFinite(previous?.pitch)
-              ? previous.pitch
-              : fallbackBase.pitch,
-        );
-        const zoom = Number.isFinite(nextState?.zoom)
-          ? nextState.zoom
-          : Number.isFinite(previous?.zoom)
-            ? previous.zoom
-            : fallbackBase.zoom;
-
-        const normalized = {
-          longitude,
-          latitude,
-          bearing,
-          pitch,
-          zoom,
-        };
-
-        if (mode === "firstPerson") {
-          const altitudeFallback = Number.isFinite(nextState?.position?.[2])
-            ? nextState.position[2]
-            : Number.isFinite(previous?.position?.[2])
-              ? previous.position[2]
-              : getCameraAltitude();
-          normalized.position = normalizePosition(
-            nextState?.position ?? previous?.position,
-            altitudeFallback,
-          );
-        } else if (Array.isArray(nextState?.position)) {
-          normalized.position = [...nextState.position];
-        }
-
-        viewStateStore[mode] = normalized;
-        return normalized;
-      };
-
-      const syncInsetViewFromDeck = () => {
-        if (!mapInset || insetUserInteracting) {
-          return;
-        }
-
-        const activeState = cloneViewStateForMode(currentViewMode);
-        if (!activeState) {
-          return;
-        }
-
-        const targetZoom = Math.max(activeState.zoom - 1, 12);
-        insetProgrammaticUpdate = true;
-        mapInset.jumpTo({
-          center: [activeState.longitude, activeState.latitude],
-          zoom: targetZoom,
-          bearing: activeState.bearing,
-          pitch: 45,
-        });
-      };
-
-      let initialViewStateStore = createInitialViewStates();
-      let viewStateStore = createInitialViewStates();
-      const wrapInitialViewStateForMode = (mode) =>
-        wrapViewStateFromStore(mode, initialViewStateStore);
-      let currentViewMode = "firstPerson";
-      let insetUserInteracting = false;
-      let insetProgrammaticUpdate = false;
-
-      if (mapInset) {
-        mapInset.on("movestart", () => {
-          if (!insetProgrammaticUpdate) {
-            insetUserInteracting = true;
-          }
-        });
-        mapInset.on("moveend", () => {
-          insetUserInteracting = false;
-          insetProgrammaticUpdate = false;
-        });
-      }
-
-      const updateViewStatesFromMap = () => {
-        const base = getMapDerivedBaseState();
-        const altitude = getCameraAltitude();
-
-        const previousFirstPerson = cloneViewStateForMode("firstPerson") ?? {
-          position: [0, 0, altitude],
-        };
-
-        viewStateStore = {
-          firstPerson: {
-            ...base,
-            position: normalizePosition(
-              previousFirstPerson.position,
-              Number.isFinite(previousFirstPerson.position?.[2])
-                ? previousFirstPerson.position[2]
-                : altitude,
-            ),
-          },
-          map: {
-            ...viewStateStore.map,
-            ...base,
-          },
-          orthographic: {
-            ...viewStateStore.orthographic,
-            ...base,
-            pitch: 0,
-          },
-        };
-      };
-
-      const viewControllers = {
-        firstPerson: {
-          type: FirstPersonController,
-          dragMode: "rotate",
-          dragPan: true,
-          keyboard: true,
-          scrollZoom: true,
-        },
-        map: {
-          type: MapController,
-          dragPan: true,
-          dragRotate: true,
-          scrollZoom: true,
-          keyboard: true,
-        },
-        orthographic: {
-          type: MapController,
-          dragPan: true,
-          dragRotate: true,
-          scrollZoom: true,
-          keyboard: true,
-        },
-      };
-
-      const createViewForMode = (mode) => {
-        if (mode === "map") {
-          return new MapView({
-            id: viewModeIds.map,
-            controller: viewControllers.map,
-          });
-        }
-        if (mode === "orthographic") {
-          return new MapView({
-            id: viewModeIds.orthographic,
-            controller: viewControllers.orthographic,
-            orthographic: true,
-          });
-        }
-        return new FirstPersonView({
-          id: viewModeIds.firstPerson,
-          controller: viewControllers.firstPerson,
-        });
-      };
-
-      let syncingFromDeck = false;
-      let syncingFromMap = false;
-
-      let deckInstance;
-      let currentBuildingLayer = null;
-      let resetViewWidget = null;
-
-      const ensureResetViewWidget = () => {
-        if (!deckInstance || !resetWidgetContainer) {
-          return;
-        }
-
-        const widgetsApi = (deck && deck.widgets) || window.deckWidgets;
-        const ResetViewWidget = widgetsApi?.ResetViewWidget;
-        if (typeof ResetViewWidget !== "function") {
-          console.warn(
-            "ResetViewWidget is unavailable in the loaded deck.gl widgets bundle.",
-          );
-          return;
-        }
-
-        if (typeof deckInstance.addWidget !== "function") {
-          console.warn(
-            "Deck instance does not expose addWidget; cannot attach ResetViewWidget.",
-          );
-          return;
-        }
-
-        const initialState = wrapInitialViewStateForMode(currentViewMode);
-        const viewId = viewModeIds[currentViewMode] ?? viewModeIds.firstPerson;
-
-        if (!resetViewWidget) {
-          resetViewWidget = new ResetViewWidget({
-            container: resetWidgetContainer,
-            initialViewState: initialState,
-            viewId,
-          });
-          deckInstance.addWidget(resetViewWidget);
-        } else if (typeof resetViewWidget.setProps === "function") {
-          resetViewWidget.setProps({
-            initialViewState: initialState,
-            viewId,
-          });
-        }
-      };
-
-      const gatherActiveLayers = () => {
-        const layers = [];
-        if (currentBuildingLayer) {
-          layers.push(currentBuildingLayer);
-        }
-        return layers;
-      };
-
-      const updateDeckLayers = () => {
-        if (!deckInstance) {
-          return;
-        }
-        deckInstance.setProps({ layers: gatherActiveLayers() });
-      };
-
-      deckInstance = new Deck({
-        parent: deckContainer,
-        views: [createViewForMode(currentViewMode)],
-        initialViewState: wrapInitialViewStateForMode(currentViewMode),
-        viewState: wrapViewStateForMode(currentViewMode),
-        layers: [],
-        getTooltip: (info) => tooltipFormatter(info),
-        onViewStateChange: ({ viewState, viewId }) => {
-          const mode = viewIdToMode[viewId] ?? currentViewMode;
-          if (syncingFromMap || mode !== currentViewMode) {
+        const handleBuildingFetch = async () => {
+          if (!fetchButton) {
             return;
           }
-
-          const nextState = viewState?.[viewId] ?? viewState;
-          if (!nextState) {
-            return;
-          }
-
-          const normalizedState = setViewStateForMode(mode, nextState);
-
-          syncingFromDeck = true;
-          map.jumpTo({
-            center: [normalizedState.longitude, normalizedState.latitude],
-            bearing: normalizedState.bearing,
-            pitch: normalizedState.pitch,
-            zoom: normalizedState.zoom,
-          });
-          syncingFromDeck = false;
-          syncDeckFromMap();
-        },
-      });
-
-      ensureResetViewWidget();
-
-      const syncDeckFromMap = () => {
-        if (syncingFromDeck) {
-          return;
-        }
-
-        syncingFromMap = true;
-        updateViewStatesFromMap();
-        deckInstance.setProps({
-          viewState: wrapViewStateForMode(currentViewMode),
-        });
-        syncInsetViewFromDeck();
-        syncingFromMap = false;
-      };
-
-      const setViewMode = (mode) => {
-        if (!viewModeIds[mode] || mode === currentViewMode) {
-          return;
-        }
-
-        currentViewMode = mode;
-        updateViewStatesFromMap();
-        deckInstance.setProps({
-          views: [createViewForMode(mode)],
-          viewState: wrapViewStateForMode(mode),
-        });
-        ensureResetViewWidget();
-        syncInsetViewFromDeck();
-      };
-
-      const handleViewShortcut = (event) => {
-        const key = event.key?.toUpperCase();
-        if (!key) {
-          return;
-        }
-
-        const target = event.target;
-        if (
-          target &&
-          (target.tagName === "INPUT" ||
-            target.tagName === "TEXTAREA" ||
-            target.isContentEditable)
-        ) {
-          return;
-        }
-
-        if (key === "T") {
-          event.preventDefault();
-          setViewMode("orthographic");
-        } else if (key === "P") {
-          event.preventDefault();
-          setViewMode("map");
-        } else if (key === "D") {
-          event.preventDefault();
-          setViewMode("firstPerson");
-        }
-      };
-
-      window.addEventListener("keydown", handleViewShortcut);
-
-      syncInsetViewFromDeck();
-
-      const disableMapGestures = () => {
-        map.dragPan.disable();
-        map.dragRotate.disable();
-        map.scrollZoom.disable();
-        map.doubleClickZoom.disable();
-        map.touchZoomRotate.disable();
-        map.keyboard.disable();
-        map.boxZoom.disable();
-      };
-
-      map.on("move", syncDeckFromMap);
-
-      if (fetchBuildingButton) {
-        fetchBuildingButton.addEventListener("click", () => {
-          void handleBuildingFetch();
-        });
-      }
-
-      const getPmtilesInstance = (() => {
-        const cache = new Map();
-        return (archivePath) => {
-          if (cache.has(archivePath)) {
-            return cache.get(archivePath);
-          }
-          const instance =
-            protocol.get(archivePath) ?? new pmtiles.PMTiles(archivePath);
-          protocol.add(instance);
-          cache.set(archivePath, instance);
-          return instance;
-        };
-      })();
-
-      const pmtilesImageResponse = (tile) => {
-        if (!tile || !tile.data) {
-          return new Response(null, { status: 204 });
-        }
-
-        const dataView =
-          tile.data instanceof ArrayBuffer
-            ? tile.data
-            : tile.data.buffer.slice(
-                tile.data.byteOffset,
-                tile.data.byteOffset + tile.data.byteLength,
+          fetchButton.disabled = true;
+          setStatus("Fetching building data…");
+          try {
+            if (typeof fetchNearestBuilding !== "function") {
+              throw new Error("Building fetch helpers are unavailable.");
+            }
+            const result = await fetchNearestBuilding({
+              latitude: deckViewState.latitude,
+              longitude: deckViewState.longitude,
+              bearing: deckViewState.bearing,
+            });
+            if (!result) {
+              currentBuildingLayer = null;
+              updateDeckLayers();
+              setStatus("No building data available for the current view.", {
+                isError: true,
+              });
+              return;
+            }
+            const { layer, focusTarget } = prepareBuildingLayer(result.geojson);
+            if (!layer) {
+              currentBuildingLayer = null;
+              updateDeckLayers();
+              setStatus(
+                "No polygon geometry returned for the nearest building.",
+                { isError: true },
               );
-
-        const headers = new Headers({ "Content-Type": "image/png" });
-        if (tile.cacheControl) {
-          headers.set("Cache-Control", tile.cacheControl);
-        }
-        if (tile.expires) {
-          headers.set("Expires", tile.expires);
-        }
-
-        return new Response(dataView, { status: 200, headers });
-      };
-
-      const pmtilesFetch = async (url, options = {}) => {
-        if (!url.startsWith("pmtiles://")) {
-          return fetch(url, options);
-        }
-
-        const matches = url.match(/^pmtiles:\/\/(.+?)\/(\d+)\/(\d+)\/(\d+)$/);
-        if (!matches) {
-          throw new Error(`Unexpected PMTiles request: ${url}`);
-        }
-
-        const [, archivePath, z, x, y] = matches;
-        const archive = getPmtilesInstance(archivePath);
-        const tile = await archive.getZxy(
-          Number.parseInt(z, 10),
-          Number.parseInt(x, 10),
-          Number.parseInt(y, 10),
-          options.signal,
-        );
-
-        return pmtilesImageResponse(tile);
-      };
-
-      const defaultTerrainBounds = [-180, -85.05113, 180, 85.05113];
-      const terrainDecoder = {
-        rScaler: 6553.6,
-        gScaler: 25.6,
-        bScaler: 0.1,
-        offset: -10000,
-      };
-
-      const terrainConfigPromise = pmtilesSource
-        .getHeader()
-        .then((header) => {
-          if (
-            header &&
-            Number.isFinite(header.minLon) &&
-            Number.isFinite(header.minLat) &&
-            Number.isFinite(header.maxLon) &&
-            Number.isFinite(header.maxLat)
-          ) {
-            return [header.minLon, header.minLat, header.maxLon, header.maxLat];
-          }
-          return defaultTerrainBounds;
-        })
-        .catch(() => defaultTerrainBounds);
-
-      const baseTerrainConfig = {
-        elevationData: `pmtiles://${pmtilesUrl}/{z}/{x}/{y}`,
-        texture: null,
-        elevationDecoder: terrainDecoder,
-        fetch: pmtilesFetch,
-        minZoom: 5,
-        maxZoom: 15,
-        skirtHeight: 15,
-      };
-
-      const createTerrainExtensionConfig = (bounds) =>
-        terrainExtension ? { ...baseTerrainConfig, bounds } : null;
-
-      const buildingLayerProps = {
-        id: buildingLayerId,
-        stroked: true,
-        filled: true,
-        extruded: true,
-        wireframe: true,
-        getFillColor: [59, 130, 246, 120],
-        getLineColor: [37, 99, 235, 255],
-        getLineWidth: 1,
-        lineWidthUnits: "pixels",
-        lineWidthMinPixels: 1.5,
-        getPolygon: (feature) => feature?.geometry?.coordinates ?? [],
-        getElevation: (feature) =>
-          parseBuildingHeight(feature?.properties ?? {}),
-        elevationScale: 1,
-        pickable: true,
-        autoHighlight: true,
-        highlightColor: [255, 255, 255, 200],
-        coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
-        extensions: terrainExtension ? [terrainExtension] : [],
-        terrainDrawMode: "offset",
-      };
-
-      const collectFeatureBounds = (features) => {
-        const bounds = {
-          minLon: Infinity,
-          minLat: Infinity,
-          maxLon: -Infinity,
-          maxLat: -Infinity,
-        };
-
-        const updateBounds = (position) => {
-          if (!Array.isArray(position) || position.length < 2) {
-            return;
-          }
-          const [lon, lat] = position;
-          if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
-            return;
-          }
-          bounds.minLon = Math.min(bounds.minLon, lon);
-          bounds.maxLon = Math.max(bounds.maxLon, lon);
-          bounds.minLat = Math.min(bounds.minLat, lat);
-          bounds.maxLat = Math.max(bounds.maxLat, lat);
-        };
-
-        const visitPolygon = (polygon) => {
-          if (!Array.isArray(polygon)) {
-            return;
-          }
-          for (const ring of polygon) {
-            if (!Array.isArray(ring)) {
-              continue;
+              return;
             }
-            for (const position of ring) {
-              updateBounds(position);
+            currentBuildingLayer = layer;
+            updateDeckLayers();
+            const featureName =
+              result.geojson?.features?.[0]?.properties?.name ||
+              result.geojson?.properties?.name ||
+              "Building";
+            setStatus(`Loaded building data for ${featureName}.`);
+            if (focusTarget) {
+              focusOnTarget(focusTarget);
             }
+          } catch (error) {
+            console.error("Building fetch failed", error);
+            setStatus(
+              error instanceof Error ? error.message : "Building fetch failed.",
+              { isError: true },
+            );
+          } finally {
+            fetchButton.disabled = false;
           }
         };
 
-        for (const feature of features) {
-          const geometry = feature?.geometry;
-          if (!geometry) {
-            continue;
+        if (fetchButton) {
+          fetchButton.addEventListener("click", handleBuildingFetch);
+          if (!fetchNearestBuilding) {
+            fetchButton.disabled = true;
+            fetchButton.title =
+              "Provide pic2bim credentials locally to enable live building fetches.";
           }
-          if (geometry.type === "Polygon") {
-            visitPolygon(geometry.coordinates);
-          } else if (geometry.type === "MultiPolygon") {
-            if (!Array.isArray(geometry.coordinates)) {
-              continue;
+        }
+
+        deckInstance = new Deck({
+          parent: deckContainer,
+          views: [new MapView({ id: mainViewId })],
+          controller: {
+            type: MapController,
+            dragPan: true,
+            dragRotate: true,
+            scrollZoom: true,
+            keyboard: true,
+            doubleClickZoom: true,
+            touchZoom: true,
+            touchRotate: true,
+          },
+          initialViewState: keyedInitialViewState,
+          viewState: keyedInitialViewState,
+          layers: [],
+          getTooltip: tooltipFormatter,
+          onViewStateChange: ({ viewId, viewState }) => {
+            if (viewId && viewId !== mainViewId) {
+              return;
             }
-            for (const polygon of geometry.coordinates) {
-              visitPolygon(polygon);
-            }
-          }
-        }
-
-        if (
-          !Number.isFinite(bounds.minLon) ||
-          !Number.isFinite(bounds.maxLon) ||
-          !Number.isFinite(bounds.minLat) ||
-          !Number.isFinite(bounds.maxLat)
-        ) {
-          return null;
-        }
-
-        return bounds;
-      };
-
-      const computeFocusTargetAltitude = (features, bounds) => {
-        if (!bounds || !Array.isArray(features) || features.length === 0) {
-          return null;
-        }
-
-        const metersPerDegreeLat = 111320;
-        const centerLatitude = (bounds.minLat + bounds.maxLat) / 2;
-        const metersPerDegreeLon =
-          Math.max(Math.cos((centerLatitude * Math.PI) / 180), 0) *
-          metersPerDegreeLat;
-
-        const latSpan =
-          Math.abs(bounds.maxLat - bounds.minLat) * metersPerDegreeLat;
-        const lonSpan =
-          Math.abs(bounds.maxLon - bounds.minLon) * metersPerDegreeLon;
-
-        const candidateAltitudes = [];
-
-        if (Number.isFinite(latSpan) && latSpan > 0) {
-          candidateAltitudes.push(latSpan * 0.75);
-        }
-        if (Number.isFinite(lonSpan) && lonSpan > 0) {
-          candidateAltitudes.push(lonSpan * 0.75);
-        }
-
-        const diagonal = Math.hypot(latSpan, lonSpan);
-        if (Number.isFinite(diagonal) && diagonal > 0) {
-          candidateAltitudes.push(diagonal * 0.5);
-        }
-
-        if (typeof parseBuildingHeight === "function") {
-          for (const feature of features) {
-            const height = parseBuildingHeight(feature?.properties ?? {});
-            if (Number.isFinite(height) && height > 0) {
-              candidateAltitudes.push(height * 0.6);
-            }
-          }
-        }
-
-        const altitude = candidateAltitudes.reduce(
-          (maxAltitude, value) =>
-            Number.isFinite(value) && value > maxAltitude ? value : maxAltitude,
-          0,
-        );
-
-        if (!Number.isFinite(altitude) || altitude <= 0) {
-          return 20;
-        }
-
-        return Math.max(altitude, 20);
-      };
-
-      const deriveFocusTarget = (features) => {
-        const bounds = collectFeatureBounds(features);
-        if (!bounds) {
-          return null;
-        }
-
-        const longitude = (bounds.minLon + bounds.maxLon) / 2;
-        const latitude = (bounds.minLat + bounds.maxLat) / 2;
-        const altitude = computeFocusTargetAltitude(features, bounds);
-
-        return {
-          longitude,
-          latitude,
-          altitude,
-        };
-      };
-
-      const prepareBuildingLayer = (data, terrainConfig) => {
-        const features = normalizeBuildingFeatures(data);
-        if (!features.length) {
-          return { layer: null, focusTarget: null };
-        }
-
-        const layer = new PolygonLayer({
-          ...buildingLayerProps,
-          data: features,
-          terrain: terrainConfig || undefined,
+            deckViewState = { ...viewState };
+            syncViewState();
+          },
         });
 
-        return { layer, focusTarget: deriveFocusTarget(features) };
-      };
-
-      const terrainSourceId = "terrainSource";
-      const hillshadeLayerId = "hillshadeLayer";
-      const terrainControl = new maplibregl.TerrainControl({
-        source: terrainSourceId,
-        exaggeration: 1,
-      });
-      let terrainControlAdded = false;
-
-      const removeTerrainControl = () => {
-        if (terrainControlAdded) {
-          map.removeControl(terrainControl);
-          terrainControlAdded = false;
-        }
-      };
-
-      const ensureTerrainResources = () => {
-        if (!basemapEnabled) {
-          map.setTerrain(null);
-          if (map.getLayer(hillshadeLayerId)) {
-            map.removeLayer(hillshadeLayerId);
-          }
-          if (map.getSource(terrainSourceId)) {
-            map.removeSource(terrainSourceId);
-          }
-          removeTerrainControl();
-          return;
-        }
-
-        if (!map.getSource(terrainSourceId)) {
-          map.addSource(terrainSourceId, {
-            type: "raster-dem",
-            url: `pmtiles://${pmtilesUrl}`,
-            tileSize: 256,
-          });
-        }
-
-        map.setTerrain({
-          source: terrainSourceId,
-          exaggeration: 1,
-        });
-
-        if (!map.getLayer(hillshadeLayerId)) {
-          map.addLayer({
-            id: hillshadeLayerId,
-            type: "hillshade",
-            source: terrainSourceId,
-            paint: {
-              "hillshade-shadow-color": "#000000",
-              "hillshade-highlight-color": "#ffffff",
-              "hillshade-accent-color": "#888888",
-            },
-          });
-        }
-
-        if (!terrainControlAdded) {
-          map.addControl(terrainControl);
-          terrainControlAdded = true;
-        }
-      };
-
-      const applyBasemapState = (nextEnabled) => {
-        const targetMode = nextEnabled ? "tiled" : "blank";
-        basemapEnabled = nextEnabled;
-        if (targetMode === currentBasemapMode) {
-          return;
-        }
-
-        currentBasemapMode = targetMode;
-
-        if (!nextEnabled) {
-          removeTerrainControl();
-          map.setTerrain(null);
-          if (map.getLayer(hillshadeLayerId)) {
-            map.removeLayer(hillshadeLayerId);
-          }
-          if (map.getSource(terrainSourceId)) {
-            map.removeSource(terrainSourceId);
-          }
-        }
-
-        const nextStyle = nextEnabled ? baseMapStyleUrl : createBlankStyle();
-        map.setStyle(nextStyle);
-      };
-
-      if (basemapToggle) {
-        basemapToggle.addEventListener("change", (event) => {
-          applyBasemapState(Boolean(event.target?.checked));
-        });
-      }
-
-      map.on("load", () => {
-        disableMapGestures();
-        map.getCanvas().style.pointerEvents = "none";
-        deckContainer.style.pointerEvents = "auto";
-        syncDeckFromMap();
-
-        ensureTerrainResources();
-        void loadSampleBuildingLayer();
-      });
-
-      if (mapInset) {
-        mapInset.on("load", () => {
-          mapInset.addSource("terrainSourceInset", {
-            type: "raster-dem",
-            url: `pmtiles://${pmtilesUrl}`,
-            tileSize: 256,
-          });
-
-          mapInset.setTerrain({
-            source: "terrainSourceInset",
-            exaggeration: 1,
-          });
-
-          mapInset.addLayer({
-            id: "hillshadeLayerInset",
-            type: "hillshade",
-            source: "terrainSourceInset",
-            paint: {
-              "hillshade-shadow-color": "#000000",
-              "hillshade-highlight-color": "#ffffff",
-              "hillshade-accent-color": "#888888",
-            },
-          });
-
-          mapInset.addControl(
-            new maplibregl.NavigationControl({
-              visualizePitch: true,
-              showZoom: true,
-              showCompass: true,
-            }),
-          );
-
-          mapInset.resize();
-          syncInsetViewFromDeck();
-        });
-      }
+        ensureResetViewWidget();
+        loadSampleBuildingLayer();
+      })();
     </script>
   </body>
 </html>
