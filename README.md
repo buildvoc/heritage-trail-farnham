@@ -1,26 +1,18 @@
-## This is an example of a walking route in Farnham Surrey England
+# deck.gl PolygonLayer example
 
-see offical council webpage [Farnham Heritage Trail](https://www.farnham.gov.uk/things-to-do/getting-outside/walks-and-countryside/heritagetrail)
+This repository hosts a minimal HTML page demonstrating the official deck.gl
+[PolygonLayer](https://deck.gl/docs/api-reference/layers/polygon-layer)
+example. The page loads the San Francisco zip code dataset from the deck.gl data
+repository, extrudes each polygon based on population density, and renders it
+with deck.gl 9.2.2.
 
-Blog: https://bertt.wordpress.com/2025/01/10/creating-interactive-3d-hiking-map/
+## Running locally
 
-Live demo: [https://buildvoc.github.io/heritage-trail-farnham/](https://buildvoc.github.io/heritage-trail-farnham/)
+Open `index.html` in a browser. All required deck.gl core and widget bundles are
+stored in the `vendor/` directory so no external CDN requests are needed.
 
-![Terrain-Building-height updates-14](https://github.com/user-attachments/assets/1d4c111d-4e67-4b2f-bcfb-5c9b21167da5)
+## Reset view widget
 
-### Local pic2bim credentials
-
-The main map loads a sample building footprint from
-[`osm_st_andrews_church_osm_2025_10_31.geojson`](https://github.com/buildvoc/heritage-trail-farnham/blob/main/osm_st_andrews_church_osm_2025_10_31.geojson),
-ensuring the primary window immediately renders an extruded wireframe polygon
-using deck.gl’s
-[`PolygonLayer`](https://deck.gl/docs/api-reference/layers/polygon-layer#wireframe)
-configuration. To enable the optional pic2bim building lookup integration you
-must provide your own credentials. Copy `pic2bim-credentials.sample.js` to
-`pic2bim-credentials.local.js` and replace the placeholder values with your
-username and password. The `.local.js` file is ignored by git so the secrets are
-never committed to the repository.
-
-### Create a Route of your Heritage Trail
-
-After you have created your route on [Active Travel Scheme Sketcher](https://plan.activetravelengland.gov.uk/index.html)
+The sample registers deck.gl’s `ResetViewWidget` and places it beneath the
+control panel. Use the widget to restore the camera to its initial state after
+panning, zooming, or rotating around the scene.

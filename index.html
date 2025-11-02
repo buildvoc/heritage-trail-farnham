@@ -3,37 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Deck.gl Building Preview</title>
+    <title>deck.gl PolygonLayer Example</title>
     <link
       rel="stylesheet"
       href="vendor/deck.gl-widgets@9.2.2/deck.gl-widgets.min.css"
     />
-    <script src="vendor/deck.gl@9.2.2/deck.gl.min.js"></script>
-    <script src="vendor/deck.gl-widgets@9.2.2/deck.gl-widgets.min.js"></script>
-    <script>
-      if (window.deck && window.deckWidgets) {
-        window.deck.widgets = {
-          ...(window.deck.widgets || {}),
-          ...window.deckWidgets,
-        };
-      }
-      window.addEventListener("load", () => {
-        if (window.deck && window.deckWidgets) {
-          window.deck.widgets = {
-            ...(window.deck.widgets || {}),
-            ...window.deckWidgets,
-          };
-        }
-      });
-    </script>
-    <script src="pic2bim-building.js"></script>
-    <!--
-      Copy pic2bim-credentials.sample.js to pic2bim-credentials.local.js and
-      update it to define window.pic2bimCredentials with
-      { username: "...", password: "..." }. The local file should never be
-      committed.
-    -->
-    <script src="pic2bim-credentials.local.js" defer></script>
     <style>
       :root {
         color-scheme: dark;
@@ -43,479 +17,221 @@
       body {
         margin: 0;
         height: 100%;
-        background-color: #0f172a;
         font-family:
           system-ui,
           -apple-system,
           BlinkMacSystemFont,
           "Segoe UI",
           sans-serif;
+        background: #020617;
+        color: #f8fafc;
       }
 
-      #deck-container {
+      #app {
+        position: relative;
+        height: 100%;
+      }
+
+      #deck-canvas {
         position: absolute;
         inset: 0;
       }
 
-      #building-controls {
+      #control-panel {
         position: absolute;
         top: 16px;
         left: 16px;
         display: flex;
         flex-direction: column;
-        gap: 10px;
-        padding: 14px 16px;
+        gap: 12px;
+        padding: 16px 18px;
+        max-width: min(320px, 80vw);
         border-radius: 12px;
-        background-color: rgba(15, 23, 42, 0.85);
+        background: rgba(2, 6, 23, 0.78);
         backdrop-filter: blur(6px);
-        color: #f8fafc;
-        max-width: min(340px, 80vw);
-        z-index: 5;
-        box-shadow: 0 18px 40px rgba(15, 23, 42, 0.35);
+        box-shadow: 0 16px 40px rgba(15, 23, 42, 0.4);
+        z-index: 10;
       }
 
-      #building-controls button {
-        padding: 10px 14px;
-        border: none;
-        border-radius: 6px;
-        font-size: 0.95rem;
+      #control-panel h1 {
+        margin: 0;
+        font-size: 1.1rem;
         font-weight: 600;
-        color: #0f172a;
-        background-color: #fbbf24;
-        cursor: pointer;
+        letter-spacing: 0.01em;
       }
 
-      #building-controls button:disabled {
-        opacity: 0.6;
-        cursor: progress;
-      }
-
-      #building-status {
-        font-size: 0.85rem;
-        line-height: 1.3;
-        min-height: 1.3em;
-        color: #bbf7d0;
+      #control-panel p {
+        margin: 0;
+        font-size: 0.9rem;
+        line-height: 1.4;
+        color: #cbd5f5;
       }
 
       #reset-view-widget {
-        min-height: 36px;
+        min-height: 44px;
       }
     </style>
+    <script src="vendor/deck.gl@9.2.2/deck.gl.min.js"></script>
+    <script src="vendor/deck.gl-widgets@9.2.2/deck.gl-widgets.min.js"></script>
+    <script>
+      (function ensureWidgetNamespace() {
+        const mergeWidgets = () => {
+          if (!window.deck || !window.deckWidgets) {
+            return;
+          }
+
+          window.deck.widgets = {
+            ...(window.deck.widgets || {}),
+            ...window.deckWidgets,
+          };
+        };
+
+        mergeWidgets();
+        window.addEventListener("load", mergeWidgets, { once: true });
+      })();
+    </script>
   </head>
   <body>
-    <div id="deck-container" aria-label="deck.gl scene"></div>
-    <div id="building-controls">
-      <button id="fetch-building" type="button">
-        Fetch nearest building (pic2bim API)
-      </button>
-      <div id="building-status" role="status" aria-live="polite"></div>
-      <div id="reset-view-widget" aria-live="polite"></div>
+    <div id="app">
+      <div id="deck-canvas" aria-label="deck.gl polygon example"></div>
+      <div id="control-panel">
+        <h1>PolygonLayer Extrusion</h1>
+        <p>
+          A deck.gl PolygonLayer rendering San Francisco zip code polygons with
+          heights derived from population density.
+        </p>
+        <div id="reset-view-widget"></div>
+      </div>
     </div>
     <script>
-      (function () {
+      (function initDeck() {
         const {
           Deck,
-          MapController,
           MapView,
           PolygonLayer,
           COORDINATE_SYSTEM,
+          AmbientLight,
+          PointLight,
+          LightingEffect,
         } = deck;
 
-        const helperNamespace = window.pic2bimBuilding ?? {};
-        const fetchNearestBuilding =
-          typeof helperNamespace.fetchNearestBuilding === "function"
-            ? helperNamespace.fetchNearestBuilding
-            : null;
-        const normalizeBuildingFeatures =
-          typeof helperNamespace.normalizeBuildingFeatures === "function"
-            ? helperNamespace.normalizeBuildingFeatures
-            : () => [];
-        const parseBuildingHeight =
-          typeof helperNamespace.parseBuildingHeight === "function"
-            ? helperNamespace.parseBuildingHeight
-            : () => 12;
+        const INITIAL_VIEW_STATE = {
+          longitude: -122.45,
+          latitude: 37.8,
+          zoom: 11,
+          minZoom: 5,
+          maxZoom: 16,
+          pitch: 45,
+          bearing: 0,
+        };
 
-        const deckContainer = document.getElementById("deck-container");
-        const fetchButton = document.getElementById("fetch-building");
-        const statusElement = document.getElementById("building-status");
+        const lights = new LightingEffect({
+          ambientLight: new AmbientLight({
+            color: [255, 255, 255],
+            intensity: 0.5,
+          }),
+          pointLight1: new PointLight({
+            color: [255, 255, 255],
+            intensity: 1,
+            position: [-122.45, 37.8, 8000],
+          }),
+          pointLight2: new PointLight({
+            color: [255, 255, 255],
+            intensity: 0.6,
+            position: [-122.35, 37.85, 5000],
+          }),
+        });
+
+        const colorScale = (density) => {
+          if (!Number.isFinite(density)) {
+            return [148, 163, 184, 180];
+          }
+
+          if (density > 5000) return [248, 113, 113, 255];
+          if (density > 3000) return [251, 191, 36, 255];
+          if (density > 1500) return [52, 211, 153, 255];
+          return [96, 165, 250, 255];
+        };
+
+        const layer = new PolygonLayer({
+          id: "population-density",
+          data: "https://raw.githubusercontent.com/visgl/deck.gl-data/master/examples/sf-zipcodes.json",
+          pickable: true,
+          stroked: true,
+          filled: true,
+          extruded: true,
+          wireframe: true,
+          lineWidthMinPixels: 1,
+          getPolygon: (f) => f.contour,
+          getElevation: (f) =>
+            (f.properties.population / f.properties.area) * 10,
+          getFillColor: (f) =>
+            colorScale(f.properties.population / f.properties.area),
+          getLineColor: [30, 41, 59],
+          material: true,
+          parameters: {
+            depthTest: true,
+          },
+          coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+        });
+
+        const tooltip = ({ object }) => {
+          if (!object) return null;
+          const { zipcode, population, area } = object.properties;
+          const density = population / area;
+          return {
+            html: `
+              <div><strong>ZIP code:</strong> ${zipcode}</div>
+              <div><strong>Population:</strong> ${population.toLocaleString()}</div>
+              <div><strong>Area:</strong> ${area.toFixed(2)} km²</div>
+              <div><strong>Density:</strong> ${density.toFixed(0)} per km²</div>
+            `,
+          };
+        };
+
+        const deckInstance = new Deck({
+          container: "deck-canvas",
+          views: [new MapView({ id: "main-map" })],
+          controller: true,
+          initialViewState: INITIAL_VIEW_STATE,
+          layers: [layer],
+          getTooltip: tooltip,
+          effects: [lights],
+        });
+
         const widgetContainer = document.getElementById("reset-view-widget");
-
-        const mainViewId = "deck-main-view";
-        const staticBuildingDataUrl =
-          "https://raw.githubusercontent.com/buildvoc/heritage-trail-farnham/main/osm_st_andrews_church_osm_2025_10_31.geojson";
-
-        const initialViewState = {
-          longitude: -0.79502,
-          latitude: 51.21699,
-          zoom: 18.25,
-          pitch: 60,
-          bearing: 24,
-        };
-
-        let deckViewState = { ...initialViewState };
-        const keyedInitialViewState = { [mainViewId]: { ...deckViewState } };
-        let currentBuildingLayer = null;
         let resetWidget = null;
-        let deckInstance = null;
 
-        const setStatus = (message, { isError = false } = {}) => {
-          if (!statusElement) {
-            return;
-          }
-          statusElement.textContent = message;
-          statusElement.style.color = isError ? "#fca5a5" : "#bbf7d0";
-        };
-
-        const buildingLayerId = "pic2bim-building";
-
-        const tooltipFormatter = (info) => {
-          const feature = info?.object;
-          if (!feature || info.layer?.id !== buildingLayerId) {
-            return null;
-          }
-          const properties = feature.properties ?? {};
-          const name =
-            properties.name ||
-            properties.ref ||
-            properties["addr:housename"] ||
-            "Building";
-          const height = parseBuildingHeight(properties);
-          const levels =
-            properties.building_levels ||
-            properties.levels ||
-            properties["building:levels"];
-          const details = [`Building: ${name}`];
-          if (Number.isFinite(height)) {
-            details.push(`Height: ${Math.round(height * 100) / 100} m`);
-          }
-          if (levels) {
-            details.push(`Levels: ${levels}`);
-          }
-          return details.join("\n");
-        };
-
-        const clampZoom = (value) => {
-          const number = Number(value);
-          if (!Number.isFinite(number)) {
-            return deckViewState.zoom;
-          }
-          return Math.min(Math.max(number, 0), 22);
-        };
-
-        const accumulateBounds = (bounds, coordinates) => {
-          if (!coordinates) {
-            return bounds;
-          }
-          if (typeof coordinates[0] === "number") {
-            const [lng, lat] = coordinates;
-            if (Number.isFinite(lng) && Number.isFinite(lat)) {
-              bounds.minLng = Math.min(bounds.minLng, lng);
-              bounds.maxLng = Math.max(bounds.maxLng, lng);
-              bounds.minLat = Math.min(bounds.minLat, lat);
-              bounds.maxLat = Math.max(bounds.maxLat, lat);
-            }
-            return bounds;
-          }
-          for (const entry of coordinates) {
-            accumulateBounds(bounds, entry);
-          }
-          return bounds;
-        };
-
-        const computeFeatureBounds = (features) => {
-          const bounds = {
-            minLng: Number.POSITIVE_INFINITY,
-            maxLng: Number.NEGATIVE_INFINITY,
-            minLat: Number.POSITIVE_INFINITY,
-            maxLat: Number.NEGATIVE_INFINITY,
-          };
-          for (const feature of features) {
-            accumulateBounds(bounds, feature?.geometry?.coordinates);
-          }
-          if (
-            !Number.isFinite(bounds.minLng) ||
-            !Number.isFinite(bounds.maxLng) ||
-            !Number.isFinite(bounds.minLat) ||
-            !Number.isFinite(bounds.maxLat)
-          ) {
-            return null;
-          }
-          return bounds;
-        };
-
-        const prepareBuildingLayer = (geojson) => {
-          const features = normalizeBuildingFeatures(geojson);
-          if (!Array.isArray(features) || features.length === 0) {
-            return { layer: null, focusTarget: null };
-          }
-          const layer = new PolygonLayer({
-            id: buildingLayerId,
-            data: features,
-            extruded: true,
-            wireframe: true,
-            filled: true,
-            autoHighlight: true,
-            coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
-            getPolygon: (feature) => feature?.geometry?.coordinates,
-            getElevation: (feature) =>
-              parseBuildingHeight(feature?.properties ?? {}),
-            getFillColor: [249, 115, 22, 140],
-            getLineColor: [255, 255, 255, 220],
-            lineWidthMinPixels: 1,
-            highlightColor: [59, 130, 246, 200],
-            material: {
-              ambient: 0.4,
-              diffuse: 0.6,
-              shininess: 32,
-            },
-            pickable: true,
-          });
-
-          const bounds = computeFeatureBounds(features);
-          if (!bounds) {
-            return { layer, focusTarget: null };
-          }
-          const focusTarget = {
-            longitude: (bounds.minLng + bounds.maxLng) / 2,
-            latitude: (bounds.minLat + bounds.maxLat) / 2,
-            zoom: Math.max(
-              deckViewState.zoom ?? initialViewState.zoom ?? 16,
-              18,
-            ),
-            bearing: deckViewState.bearing ?? initialViewState.bearing,
-            pitch: deckViewState.pitch ?? initialViewState.pitch,
-          };
-          return { layer, focusTarget };
-        };
-
-        const updateDeckLayers = () => {
-          if (!deckInstance) {
-            return;
-          }
-          const layers = currentBuildingLayer ? [currentBuildingLayer] : [];
-          deckInstance.setProps({ layers });
-        };
-
-        const syncViewState = () => {
-          if (!deckInstance) {
-            return;
-          }
-          const keyedState = { [mainViewId]: { ...deckViewState } };
-          deckInstance.setProps({ viewState: keyedState });
-          if (resetWidget && typeof resetWidget.setProps === "function") {
-            resetWidget.setProps({
-              viewId: mainViewId,
-              viewState: keyedState,
-              initialViewState: keyedInitialViewState,
-            });
-          }
-        };
-
-        const applyViewState = (updates = {}) => {
-          deckViewState = { ...deckViewState, ...updates };
-          syncViewState();
-        };
-
-        const focusOnTarget = (target) => {
-          if (!target) {
-            return;
-          }
-          const hasLngLat =
-            Number.isFinite(target.longitude) &&
-            Number.isFinite(target.latitude);
-          applyViewState({
-            longitude: hasLngLat ? target.longitude : deckViewState.longitude,
-            latitude: hasLngLat ? target.latitude : deckViewState.latitude,
-            zoom: clampZoom(target.zoom ?? deckViewState.zoom),
-            bearing: Number.isFinite(target.bearing)
-              ? target.bearing
-              : deckViewState.bearing,
-            pitch: Number.isFinite(target.pitch)
-              ? target.pitch
-              : deckViewState.pitch,
-          });
-        };
-
-        const ensureResetViewWidget = () => {
-          if (window.deck && window.deckWidgets) {
-            window.deck.widgets = {
-              ...(window.deck.widgets || {}),
-              ...window.deckWidgets,
-            };
-          }
+        const ensureResetWidget = () => {
           const widgetsNamespace = deck.widgets;
-          if (
-            !widgetsNamespace ||
-            typeof widgetsNamespace.ResetViewWidget !== "function"
-          ) {
-            console.warn(
-              "ResetViewWidget is unavailable in the current deck.gl build.",
-            );
+          if (!widgetsNamespace || !widgetsNamespace.ResetViewWidget) {
+            console.warn("ResetViewWidget is unavailable");
             return;
           }
-          if (!widgetContainer) {
-            console.warn("ResetViewWidget container element is missing.");
+
+          if (typeof deckInstance.addWidget !== "function") {
+            console.warn("Deck instance does not support widgets");
             return;
           }
-          const needsInitialisation = !resetWidget;
+
           if (!resetWidget) {
             resetWidget = new widgetsNamespace.ResetViewWidget({
               container: widgetContainer,
-              viewId: mainViewId,
-              initialViewState: keyedInitialViewState,
-              label: "Reset view",
+              onReset: () => {
+                deckInstance.setProps({ viewState: { ...INITIAL_VIEW_STATE } });
+                // Clear viewState override to resume controller-driven updates
+                deckInstance.setProps({ viewState: null });
+              },
             });
-          } else {
-            resetWidget.setProps({
-              container: widgetContainer,
-              viewId: mainViewId,
-              initialViewState: keyedInitialViewState,
-            });
-          }
-          if (
-            deckInstance &&
-            typeof deckInstance.addWidget === "function" &&
-            needsInitialisation
-          ) {
             deckInstance.addWidget(resetWidget);
-          } else if (deckInstance) {
-            deckInstance.setProps({ widgets: [resetWidget] });
-          }
-          syncViewState();
-        };
-
-        const loadSampleBuildingLayer = async () => {
-          setStatus("Loading sample building footprint…");
-          try {
-            const response = await fetch(staticBuildingDataUrl);
-            if (!response.ok) {
-              throw new Error(
-                `Failed to load sample dataset (${response.status}).`,
-              );
-            }
-            const geojson = await response.json();
-            const { layer, focusTarget } = prepareBuildingLayer(geojson);
-            if (!layer) {
-              currentBuildingLayer = null;
-              updateDeckLayers();
-              setStatus(
-                "Sample dataset did not contain polygon geometry for extrusion.",
-                { isError: true },
-              );
-              return;
-            }
-            currentBuildingLayer = layer;
-            updateDeckLayers();
-            setStatus(
-              "Loaded sample building footprint. Provide pic2bim credentials locally to fetch live buildings.",
-            );
-            if (focusTarget) {
-              focusOnTarget(focusTarget);
-            }
-          } catch (error) {
-            console.error(
-              "Unable to load the sample building footprint",
-              error,
-            );
-            currentBuildingLayer = null;
-            updateDeckLayers();
-            setStatus(
-              "Unable to load the sample building footprint. Provide pic2bim credentials locally to fetch live buildings.",
-              { isError: true },
-            );
           }
         };
 
-        const handleBuildingFetch = async () => {
-          if (!fetchButton) {
-            return;
-          }
-          fetchButton.disabled = true;
-          setStatus("Fetching building data…");
-          try {
-            if (typeof fetchNearestBuilding !== "function") {
-              throw new Error("Building fetch helpers are unavailable.");
-            }
-            const result = await fetchNearestBuilding({
-              latitude: deckViewState.latitude,
-              longitude: deckViewState.longitude,
-              bearing: deckViewState.bearing,
-            });
-            if (!result) {
-              currentBuildingLayer = null;
-              updateDeckLayers();
-              setStatus("No building data available for the current view.", {
-                isError: true,
-              });
-              return;
-            }
-            const { layer, focusTarget } = prepareBuildingLayer(result.geojson);
-            if (!layer) {
-              currentBuildingLayer = null;
-              updateDeckLayers();
-              setStatus(
-                "No polygon geometry returned for the nearest building.",
-                { isError: true },
-              );
-              return;
-            }
-            currentBuildingLayer = layer;
-            updateDeckLayers();
-            const featureName =
-              result.geojson?.features?.[0]?.properties?.name ||
-              result.geojson?.properties?.name ||
-              "Building";
-            setStatus(`Loaded building data for ${featureName}.`);
-            if (focusTarget) {
-              focusOnTarget(focusTarget);
-            }
-          } catch (error) {
-            console.error("Building fetch failed", error);
-            setStatus(
-              error instanceof Error ? error.message : "Building fetch failed.",
-              { isError: true },
-            );
-          } finally {
-            fetchButton.disabled = false;
-          }
-        };
-
-        if (fetchButton) {
-          fetchButton.addEventListener("click", handleBuildingFetch);
-          if (!fetchNearestBuilding) {
-            fetchButton.disabled = true;
-            fetchButton.title =
-              "Provide pic2bim credentials locally to enable live building fetches.";
-          }
+        if (document.readyState === "complete") {
+          ensureResetWidget();
+        } else {
+          window.addEventListener("load", ensureResetWidget, { once: true });
         }
-
-        deckInstance = new Deck({
-          parent: deckContainer,
-          views: [new MapView({ id: mainViewId })],
-          controller: {
-            type: MapController,
-            dragPan: true,
-            dragRotate: true,
-            scrollZoom: true,
-            keyboard: true,
-            doubleClickZoom: true,
-            touchZoom: true,
-            touchRotate: true,
-          },
-          viewState: keyedInitialViewState,
-          layers: [],
-          getTooltip: tooltipFormatter,
-          onViewStateChange: ({ viewId, viewState }) => {
-            if (viewId && viewId !== mainViewId) {
-              return;
-            }
-            deckViewState = { ...viewState };
-            syncViewState();
-          },
-        });
-
-        ensureResetViewWidget();
-        loadSampleBuildingLayer();
       })();
     </script>
   </body>
