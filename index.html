@@ -1,109 +1,535 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Display a 3D Map</title>
-  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.0.0/dist/maplibre-gl.css" crossorigin="anonymous">
-  <script src="https://unpkg.com/maplibre-gl@5.0.0/dist/maplibre-gl.js" crossorigin="anonymous"></script>
-  <script src="https://unpkg.com/pmtiles@4.1.0/dist/pmtiles.js"></script>
-<style>
-    body { 
-      margin: 0; 
-      padding: 0;
-    }
+  <head>
+    <meta charset="utf-8" />
+    <title>deck.gl Playground &mdash; GeoJsonLayer</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css"
+    />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/deck.gl@9.2.2/dist/stylesheet.css"
+    />
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
+        --left-pane-width: clamp(320px, 36vw, 520px);
+        --header-height: 56px;
+        --control-height: 46px;
+        --accent-color: #2563eb;
+        --border-color: #e2e8f0;
+        --muted-text: #475569;
+      }
 
-    #map { 
-      position: absolute; 
-      top: 0; 
-      bottom: 0; 
-      width: 100%; 
-    }
-  </style>
-</head>
-<body>
-  <div id="map"></div>
-  <script>
-      let protocol = new pmtiles.Protocol();
-      maplibregl.addProtocol("pmtiles",protocol.tile);
-      let URL = "output.pmtiles";
-      const map = new maplibregl.Map({
-        style: 'https://tiles.openfreemap.org/styles/liberty',
-        container: 'map', // container id
-        center: [-0.7960, 51.2140], 
-        zoom: 16,
-        pitch: 61,
-        bearing: 0,
-        maxPitch: 85,
-        maxZoom: 20
-      });
+      * {
+        box-sizing: border-box;
+      }
 
-    map.on('load', () => {
-      map.addSource('terrainSource', {
-          type: "raster-dem",
-          url: "pmtiles://" + URL,
-          tileSize: 256
-      });
-      map.addSource('hillshadeSource', {
-        type: "raster-dem",
-        url: "pmtiles://" + URL,
-        tileSize: 256,
-      });
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: #f8fafc;
+        display: flex;
+        flex-direction: column;
+        color: #0f172a;
+      }
 
-      map.setTerrain({
-          source: "terrainSource",
-          exaggeration: 1
-        });
+      header {
+        height: var(--header-height);
+        display: flex;
+        align-items: center;
+        padding: 0 20px;
+        border-bottom: 1px solid var(--border-color);
+        background: #ffffff;
+        gap: 16px;
+      }
 
-        map.addLayer({
-            id: 'hillshadeLayer',
-            type: 'hillshade',
-            source: 'terrainSource',
-            paint: {
-                'hillshade-shadow-color': '#000000', 
-                'hillshade-highlight-color': '#ffffff',
-                'hillshade-accent-color': '#888888'
+      header h1 {
+        margin: 0;
+        font-size: 18px;
+        font-weight: 600;
+      }
+
+      header a {
+        color: var(--accent-color);
+        font-size: 14px;
+        text-decoration: none;
+      }
+
+      #app {
+        flex: 1;
+        display: flex;
+        min-height: 0;
+      }
+
+      #left-pane {
+        width: var(--left-pane-width);
+        min-width: 280px;
+        max-width: 560px;
+        display: flex;
+        flex-direction: column;
+        border-right: 1px solid var(--border-color);
+        background: #f1f5f9;
+      }
+
+      #config-bar {
+        padding: 12px 16px 8px 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        border-bottom: 1px solid var(--border-color);
+        background: #ffffff;
+        box-shadow: inset 0 -1px 0 #e2e8f0;
+        z-index: 1;
+      }
+
+      #config-bar label {
+        font-size: 12px;
+        letter-spacing: 0.03em;
+        font-weight: 600;
+        text-transform: uppercase;
+        color: var(--muted-text);
+      }
+
+      #template-select {
+        appearance: none;
+        height: var(--control-height);
+        padding: 0 36px 0 12px;
+        border-radius: 8px;
+        border: 1px solid var(--border-color);
+        background: #f8fafc;
+        font-size: 15px;
+        font-weight: 500;
+        color: #0f172a;
+        outline: none;
+        background-image: url('data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="%23475669" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"%3E%3Cpolyline points="6 9 12 15 18 9"/%3E%3C/svg%3E');
+        background-repeat: no-repeat;
+        background-position: right 10px center;
+        cursor: not-allowed;
+      }
+
+      #template-select:focus {
+        border-color: var(--accent-color);
+      }
+
+      #example-meta {
+        font-size: 14px;
+        line-height: 1.4;
+        color: var(--muted-text);
+      }
+
+      #editor-container {
+        flex: 1;
+        min-height: 0;
+      }
+
+      #editor {
+        height: 100%;
+        width: 100%;
+      }
+
+      #right-pane {
+        flex: 1;
+        position: relative;
+        background: #e2e8f0;
+      }
+
+      #map {
+        position: absolute;
+        inset: 0;
+      }
+
+      #loading {
+        position: absolute;
+        top: 16px;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 8px 14px;
+        background: rgba(15, 23, 42, 0.85);
+        color: #f8fafc;
+        border-radius: 999px;
+        font-size: 13px;
+        letter-spacing: 0.01em;
+        box-shadow: 0 4px 12px rgba(15, 23, 42, 0.18);
+        z-index: 10;
+        display: none;
+      }
+
+      #loading.visible {
+        display: inline-flex;
+      }
+
+      #tooltip {
+        position: absolute;
+        pointer-events: none;
+        background: rgba(15, 23, 42, 0.86);
+        color: #f8fafc;
+        padding: 6px 10px;
+        border-radius: 6px;
+        font-size: 12px;
+        line-height: 1.4;
+        white-space: nowrap;
+        z-index: 20;
+        transform: translate(-50%, -110%);
+        display: none;
+      }
+
+      #tooltip.visible {
+        display: block;
+      }
+
+      @media (max-width: 960px) {
+        #app {
+          flex-direction: column;
+        }
+
+        #left-pane {
+          width: 100%;
+          max-width: none;
+          border-right: none;
+          border-bottom: 1px solid var(--border-color);
+        }
+
+        #right-pane {
+          min-height: 50vh;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>deck.gl Playground</h1>
+      <a
+        href="https://deck.gl/#/examples/core-layers/geojson-layer-polygons"
+        target="_blank"
+        rel="noreferrer"
+      >
+        GeoJsonLayer (polygons) example
+      </a>
+      <a
+        href="https://github.com/visgl/deck.gl/tree/master/examples/playground"
+        target="_blank"
+        rel="noreferrer"
+      >
+        Source
+      </a>
+    </header>
+    <div id="app">
+      <div id="left-pane">
+        <div id="config-bar">
+          <label for="template-select">Configuration</label>
+          <select id="template-select" disabled>
+            <option selected>website/GeoJsonLayer (deck.gl)</option>
+          </select>
+          <div id="example-meta"></div>
+        </div>
+        <div id="editor-container">
+          <div id="editor"></div>
+        </div>
+      </div>
+      <div id="right-pane">
+        <div id="loading">Loading GeoJsonLayer example…</div>
+        <div id="map"></div>
+        <div id="tooltip"></div>
+      </div>
+    </div>
+
+    <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
+    <script src="https://unpkg.com/deck.gl@9.2.2/dist.min.js"></script>
+    <script src="https://unpkg.com/@deck.gl/widgets@9.2.2/dist.min.js"></script>
+    <script>
+      if (window.deck && !window.deck.widgets && window.deckWidgets) {
+        window.deck.widgets = window.deckWidgets;
+      }
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
+    <script>
+      const PLAYGROUND_JSON_URL =
+        "https://raw.githubusercontent.com/visgl/deck.gl/master/examples/playground/json-examples/geojson.json";
+
+      const STATE = {
+        overlay: null,
+        map: null,
+        monacoEditor: null,
+        config: null,
+        widgets: [],
+        tooltip: document.getElementById("tooltip"),
+        loading: document.getElementById("loading"),
+        widgetObserver: null,
+      };
+
+      function showLoading(isVisible) {
+        STATE.loading.classList.toggle("visible", Boolean(isVisible));
+      }
+
+      function accessorFromExpression(expression) {
+        if (typeof expression !== "string") {
+          return expression;
+        }
+        if (!expression.startsWith("@@=")) {
+          return expression;
+        }
+        const body = expression.slice(3);
+        if (body.startsWith("properties.")) {
+          const path = body.split(".").slice(1);
+          return (feature) => {
+            let current = feature.properties;
+            for (const key of path) {
+              if (current == null) {
+                return undefined;
+              }
+              current = current[key];
             }
+            const value = Number(current);
+            return Number.isFinite(value) ? value : current;
+          };
+        }
+        return () => undefined;
+      }
+
+      function describeExample(config) {
+        const metaEl = document.getElementById("example-meta");
+        if (!config) {
+          metaEl.textContent = "";
+          return;
+        }
+        const lines = [];
+        if (config.description) {
+          lines.push(config.description);
+        }
+        if (config.websiteUrl) {
+          lines.push(`Website: ${config.websiteUrl}`);
+        }
+        metaEl.innerHTML = lines
+          .map((line) =>
+            line.includes("http")
+              ? `<a href="${
+                  line.split("Website: ")[1]
+                }" target="_blank" rel="noreferrer">${line}</a>`
+              : line,
+          )
+          .join("<br />");
+      }
+
+      function createWidgets(widgetConfigs = []) {
+        const widgetRegistry =
+          (window.deck && window.deck.widgets) || window.deckWidgets || null;
+        if (!widgetRegistry) {
+          return [];
+        }
+        const instances = [];
+        for (const widgetConfig of widgetConfigs) {
+          const typeName = widgetConfig["@@type"];
+          const WidgetCtor = widgetRegistry[typeName];
+          if (typeof WidgetCtor !== "function") {
+            continue;
+          }
+          const props = { ...widgetConfig };
+          delete props["@@type"];
+          instances.push(new WidgetCtor(props));
+        }
+        return instances;
+      }
+
+      function createGeoJsonLayer(layerConfig) {
+        const props = { ...layerConfig };
+        delete props["@@type"];
+        if (typeof props.getElevation === "string") {
+          props.getElevation = accessorFromExpression(props.getElevation);
+        }
+        if (typeof props.getFillColor === "string") {
+          props.getFillColor = accessorFromExpression(props.getFillColor);
+        }
+        if (typeof props.getLineColor === "string") {
+          props.getLineColor = accessorFromExpression(props.getLineColor);
+        }
+        props.pickable = true;
+        props.onHover = ({ object, x, y }) => {
+          if (object) {
+            STATE.tooltip.textContent = `${(
+              object.properties?.valuePerSqm || 0
+            ).toLocaleString()} $/m²`;
+            STATE.tooltip.style.left = `${x}px`;
+            STATE.tooltip.style.top = `${y}px`;
+            STATE.tooltip.classList.add("visible");
+          } else {
+            STATE.tooltip.classList.remove("visible");
+          }
+        };
+        props.onClick = () => {
+          STATE.tooltip.classList.remove("visible");
+        };
+        return new deck.GeoJsonLayer(props);
+      }
+
+      function createLayers(layerConfigs = []) {
+        const layers = [];
+        for (const layer of layerConfigs) {
+          switch (layer["@@type"]) {
+            case "GeoJsonLayer":
+              layers.push(createGeoJsonLayer(layer));
+              break;
+            default:
+              console.warn(
+                "Unsupported layer type in playground JSON:",
+                layer["@@type"],
+              );
+          }
+        }
+        return layers;
+      }
+
+      function initMap(config) {
+        const initial = config.initialViewState || {};
+        STATE.map = new maplibregl.Map({
+          container: "map",
+          style:
+            (config.views && config.views[0] && config.views[0].mapStyle) ||
+            "https://basemaps.cartocdn.com/gl/positron-nolabels-gl-style/style.json",
+          center: [initial.longitude || 0, initial.latitude || 0],
+          zoom: initial.zoom ?? 10,
+          pitch: initial.pitch ?? 0,
+          bearing: initial.bearing ?? 0,
+          maxZoom: initial.maxZoom ?? 20,
+          attributionControl: true,
         });
 
-      fetch('LAD_Waverley_active-travel-heritage-trail-farnham.geojson')
-        .then(response => response.json())
-        .then(geojsonData => {
-            map.addSource('line-source', {
-                type: 'geojson',
-                data: geojsonData
-            });
+        STATE.map.on("load", () => {
+          const layers = createLayers(config.layers);
+          const widgets = createWidgets(config.widgets);
+          STATE.widgets = widgets;
+          STATE.overlay = new deck.MapboxOverlay({
+            interleaved: true,
+            layers,
+            widgets,
+            getTooltip: ({ object }) =>
+              object
+                ? {
+                    text: `${object.properties?.valuePerSqm?.toLocaleString()} $/m²`,
+                    style: { fontSize: "12px" },
+                  }
+                : null,
+          });
+          STATE.map.addControl(STATE.overlay);
+          monitorWidgetMount();
+          showLoading(false);
+        });
+      }
 
-            map.addLayer({
-                id: 'line-layer',
-                type: 'line',
-                source: 'line-source',
-                layout: {
-                    'line-join': 'round',
-                    'line-cap': 'round'
-                },
-                paint: {
-                    'line-color': '#ff0000',
-                    'line-width': 6
-                }
-            });
-          });    
-      });
+      function verifyWidgetDom(container) {
+        if (!container) {
+          return false;
+        }
+        const topLeftContainer = container.querySelector(
+          ".deck-widget-container.top-left",
+        );
+        if (!topLeftContainer) {
+          return false;
+        }
+        const zoomWidget = topLeftContainer.querySelector(
+          ".deck-widget.deck-widget-zoom .deck-widget-zoom-in",
+        );
+        const compassWidget = topLeftContainer.querySelector(
+          ".deck-widget.deck-widget-compass",
+        );
+        if (zoomWidget && compassWidget) {
+          console.debug("Deck widget container detected:", topLeftContainer);
+        } else {
+          console.warn(
+            "Deck widget container found but expected widgets are missing.",
+          );
+        }
+        return Boolean(zoomWidget && compassWidget);
+      }
 
-     map.addControl(
-        new maplibregl.NavigationControl({
-          visualizePitch: true,
-          showZoom: true,
-          showCompass: true,
-        })
-      );
+      function monitorWidgetMount() {
+        const mapContainer = STATE.map?.getContainer?.();
+        if (!mapContainer) {
+          return;
+        }
+        if (verifyWidgetDom(mapContainer)) {
+          return;
+        }
+        if (STATE.widgetObserver) {
+          STATE.widgetObserver.disconnect();
+        }
+        STATE.widgetObserver = new MutationObserver(() => {
+          if (verifyWidgetDom(mapContainer) && STATE.widgetObserver) {
+            STATE.widgetObserver.disconnect();
+            STATE.widgetObserver = null;
+          }
+        });
+        STATE.widgetObserver.observe(mapContainer, {
+          childList: true,
+          subtree: true,
+        });
+        window.setTimeout(() => {
+          if (!verifyWidgetDom(mapContainer)) {
+            console.warn(
+              "Deck widget container not detected after timeout. Verify widget bundle availability.",
+            );
+          }
+        }, 3000);
+      }
 
-      map.addControl(
-        new maplibregl.TerrainControl({
-          source: "terrainSource",
-          exaggeration: 1
-        })
-      );
-  </script>
-</body>
+      function initEditor(config) {
+        const pretty = JSON.stringify(config, null, 2);
+        describeExample(config);
+        require.config({
+          paths: {
+            vs: "https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs",
+          },
+        });
+        window.MonacoEnvironment = {
+          getWorkerUrl: function (workerId, label) {
+            return `data:text/javascript;charset=utf-8,${encodeURIComponent(`
+              self.MonacoEnvironment = {baseUrl: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/'};
+              importScripts('https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/base/worker/workerMain.js');
+            `)}`;
+          },
+        };
+        require(["vs/editor/editor.main"], function () {
+          STATE.monacoEditor = monaco.editor.create(
+            document.getElementById("editor"),
+            {
+              value: pretty,
+              language: "json",
+              readOnly: true,
+              automaticLayout: true,
+              minimap: { enabled: false },
+              scrollBeyondLastLine: false,
+              fontSize: 13,
+            },
+          );
+        });
+      }
+
+      async function bootstrap() {
+        try {
+          showLoading(true);
+          const response = await fetch(PLAYGROUND_JSON_URL);
+          if (!response.ok) {
+            throw new Error(
+              `Failed to fetch playground JSON: ${response.status}`,
+            );
+          }
+          const config = await response.json();
+          STATE.config = config;
+          initEditor(config);
+          initMap(config);
+        } catch (error) {
+          showLoading(false);
+          console.error(error);
+          alert(
+            "Unable to load the deck.gl GeoJsonLayer example. Please try again later.",
+          );
+        }
+      }
+
+      bootstrap();
+    </script>
+  </body>
 </html>
