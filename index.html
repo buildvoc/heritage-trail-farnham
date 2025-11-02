@@ -14,18 +14,7 @@
       crossorigin="anonymous"
     ></script>
     <script src="https://unpkg.com/pmtiles@4.1.0/dist/pmtiles.js"></script>
-    <link
-      rel="stylesheet"
-      href="https://unpkg.com/@deck.gl/widgets@9.2.2/dist/stylesheet.css"
-      crossorigin="anonymous"
-    />
     <script src="https://unpkg.com/deck.gl@9.2.2/dist.min.js"></script>
-    <script type="module">
-      import { ResetViewWidget } from "https://esm.sh/@deck.gl/widgets@9.2.2?bundle";
-      window.deckResetViewWidget = ResetViewWidget;
-      window.deckResetViewWidgetReady = true;
-      window.dispatchEvent(new CustomEvent("deck-reset-view-widget-ready"));
-    </script>
     <script src="pic2bim-building.js"></script>
     <!--
       Copy pic2bim-credentials.sample.js to pic2bim-credentials.local.js and
@@ -131,21 +120,6 @@
         line-height: 1.2;
         min-height: 1.2em;
       }
-
-      .deck-widget.deck-widget-reset-view {
-        margin: 12px;
-      }
-
-      .deck-widget-reset-view .deck-widget-icon-button {
-        background: rgba(17, 24, 39, 0.85);
-        border-radius: 6px;
-        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.35);
-      }
-
-      .deck-widget-reset-view .deck-widget-icon-button:hover,
-      .deck-widget-reset-view .deck-widget-icon-button:focus-visible {
-        background: rgba(59, 130, 246, 0.9);
-      }
     </style>
   </head>
   <body>
@@ -179,14 +153,6 @@
         normalizeBuildingFeatures,
         parseBuildingHeight,
       } = window.pic2bimBuilding ?? {};
-
-      const resolveResetWidgetCtor = () =>
-        window.deckResetViewWidget ??
-        window.ResetViewWidget ??
-        (window.deckWidgets ? window.deckWidgets.ResetViewWidget : null);
-
-      let ResetViewWidgetCtor = resolveResetWidgetCtor();
-      let resetViewWidget = null;
 
       if (!fetchNearestBuilding) {
         console.warn(
@@ -251,6 +217,7 @@
         bearing: initialMapState.bearing,
         maxPitch: 85,
         maxZoom: 20,
+        interactive: false,
       });
 
       const insetMapElement = document.getElementById("map-inset");
@@ -796,39 +763,6 @@
       let insetUserInteracting = false;
       let insetProgrammaticUpdate = false;
 
-      const ensureResetViewWidget = (mode) => {
-        if (!ResetViewWidgetCtor) {
-          return null;
-        }
-
-        const viewId = viewModeIds[mode] ?? viewModeIds.firstPerson;
-        const initialEntry =
-          cloneStateEntry(initialViewStateStore?.[mode]) ??
-          cloneStateEntry(initialViewStateStore?.firstPerson);
-
-        if (!resetViewWidget) {
-          resetViewWidget = new ResetViewWidgetCtor({
-            id: "main-reset-view",
-            placement: "top-right",
-            viewId,
-            label: "Reset view",
-            initialViewState: initialEntry ?? undefined,
-          });
-        } else {
-          resetViewWidget.setProps({
-            viewId,
-            initialViewState: initialEntry ?? undefined,
-          });
-        }
-
-        return resetViewWidget;
-      };
-
-      if (ResetViewWidgetCtor || window.deckResetViewWidgetReady) {
-        ResetViewWidgetCtor = ResetViewWidgetCtor ?? resolveResetWidgetCtor();
-        ensureResetViewWidget(currentViewMode);
-      }
-
       if (mapInset) {
         mapInset.on("movestart", () => {
           if (!insetProgrammaticUpdate) {
@@ -943,7 +877,6 @@
         viewState: wrapViewStateForMode(currentViewMode),
         layers: [],
         getTooltip: (info) => tooltipFormatter(info),
-        widgets: resetViewWidget ? [resetViewWidget] : [],
         onViewStateChange: ({ viewState, viewId }) => {
           const mode = viewIdToMode[viewId] ?? currentViewMode;
           if (syncingFromMap || mode !== currentViewMode) {
@@ -990,29 +923,12 @@
 
         currentViewMode = mode;
         updateViewStatesFromMap();
-        const widgetForMode = ensureResetViewWidget(mode);
         deckInstance.setProps({
           views: [createViewForMode(mode)],
           viewState: wrapViewStateForMode(mode),
-          widgets: widgetForMode ? [widgetForMode] : [],
         });
         syncInsetViewFromDeck();
       };
-
-      window.addEventListener("deck-reset-view-widget-ready", () => {
-        const nextCtor = resolveResetWidgetCtor();
-        if (!nextCtor) {
-          return;
-        }
-
-        ResetViewWidgetCtor = nextCtor;
-        const widgetForMode = ensureResetViewWidget(currentViewMode);
-        if (deckInstance) {
-          deckInstance.setProps({
-            widgets: widgetForMode ? [widgetForMode] : [],
-          });
-        }
-      });
 
       const handleViewShortcut = (event) => {
         const key = event.key?.toUpperCase();
@@ -1432,14 +1348,6 @@
         ensureTerrainResources();
         void loadSampleBuildingLayer();
       });
-
-      map.addControl(
-        new maplibregl.NavigationControl({
-          visualizePitch: true,
-          showZoom: true,
-          showCompass: true,
-        }),
-      );
 
       if (mapInset) {
         mapInset.on("load", () => {
