@@ -2,8 +2,10 @@
 
 This repository hosts a static HTML page that mirrors the deck.gl website
 [GeoJsonLayer polygons example](https://deck.gl/#/examples/core-layers/geojson-layer-polygons).
-It loads the Vancouver block dataset, renders it with an extruded GeoJsonLayer,
-and applies the Positron base map from CARTO via MapLibre GL.
+At runtime the page downloads the official playground JSON configuration and
+instantiates the views, layers, and widgets described in that file. The
+Vancouver block dataset renders as an extruded GeoJsonLayer atop the CARTO
+Positron base map via MapLibre GL.
 
 ## Running locally
 
@@ -13,6 +15,6 @@ fetches the GeoJSON and map style from public endpoints.
 
 ## Widgets
 
-The demo registers the deck.gl Zoom and Compass widgets. They render inside the
-control panel and provide quick navigation tools for zooming and reorienting the
-view.
+The demo registers the deck.gl Zoom and Compass widgets defined in the
+configuration. They render inside the control panel and provide quick navigation
+tools for zooming and reorienting the view.
