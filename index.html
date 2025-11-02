@@ -12,8 +12,19 @@
     <script src="vendor/deck.gl-widgets@9.2.2/deck.gl-widgets.min.js"></script>
     <script>
       if (window.deck && window.deckWidgets) {
-        window.deck.widgets = window.deckWidgets;
+        window.deck.widgets = {
+          ...(window.deck.widgets || {}),
+          ...window.deckWidgets,
+        };
       }
+      window.addEventListener("load", () => {
+        if (window.deck && window.deckWidgets) {
+          window.deck.widgets = {
+            ...(window.deck.widgets || {}),
+            ...window.deckWidgets,
+          };
+        }
+      });
     </script>
     <script src="pic2bim-building.js"></script>
     <!--
@@ -326,6 +337,12 @@
         };
 
         const ensureResetViewWidget = () => {
+          if (window.deck && window.deckWidgets) {
+            window.deck.widgets = {
+              ...(window.deck.widgets || {}),
+              ...window.deckWidgets,
+            };
+          }
           const widgetsNamespace = deck.widgets;
           if (
             !widgetsNamespace ||
@@ -340,6 +357,7 @@
             console.warn("ResetViewWidget container element is missing.");
             return;
           }
+          const needsInitialisation = !resetWidget;
           if (!resetWidget) {
             resetWidget = new widgetsNamespace.ResetViewWidget({
               container: widgetContainer,
@@ -354,7 +372,13 @@
               initialViewState: keyedInitialViewState,
             });
           }
-          if (deckInstance) {
+          if (
+            deckInstance &&
+            typeof deckInstance.addWidget === "function" &&
+            needsInitialisation
+          ) {
+            deckInstance.addWidget(resetWidget);
+          } else if (deckInstance) {
             deckInstance.setProps({ widgets: [resetWidget] });
           }
           syncViewState();
