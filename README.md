@@ -7,9 +7,9 @@ and applies the Positron base map from CARTO via MapLibre GL.
 
 ## Running locally
 
-Open `index.html` in a modern browser. The page references deck.gl 9.2.2 and its
-widget bundle from the `vendor/` directory and fetches the GeoJSON and map style
-from public endpoints.
+Open `index.html` in a modern browser. The page references deck.gl 9.2.2, its
+widget bundle, and MapLibre GL 3.6.2 from the checked-in `vendor/` directory and
+fetches the GeoJSON and map style from public endpoints.
 
 ## Widgets
 
