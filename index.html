@@ -20,6 +20,12 @@
       crossorigin="anonymous"
     />
     <script src="https://unpkg.com/deck.gl@9.2.2/dist.min.js"></script>
+    <script type="module">
+      import { ResetViewWidget } from "https://esm.sh/@deck.gl/widgets@9.2.2?bundle";
+      window.deckResetViewWidget = ResetViewWidget;
+      window.deckResetViewWidgetReady = true;
+      window.dispatchEvent(new CustomEvent("deck-reset-view-widget-ready"));
+    </script>
     <script src="pic2bim-building.js"></script>
     <!--
       Copy pic2bim-credentials.sample.js to pic2bim-credentials.local.js and
@@ -91,7 +97,7 @@
           sans-serif;
       }
 
-      #building-controls button:not(.deck-widget-reset-view__button) {
+      #building-controls button {
         padding: 8px 12px;
         font-size: 0.95rem;
         color: #111827;
@@ -126,30 +132,19 @@
         min-height: 1.2em;
       }
 
-      .deck-widget-reset-view__button {
-        padding: 8px 12px;
-        border-radius: 6px;
-        border: none;
+      .deck-widget.deck-widget-reset-view {
+        margin: 12px;
+      }
+
+      .deck-widget-reset-view .deck-widget-icon-button {
         background: rgba(17, 24, 39, 0.85);
-        color: #f9fafb;
-        font-size: 0.9rem;
-        font-weight: 600;
-        cursor: pointer;
+        border-radius: 6px;
         box-shadow: 0 4px 10px rgba(0, 0, 0, 0.35);
-        transition:
-          background-color 0.15s ease,
-          transform 0.15s ease;
       }
 
-      .deck-widget-reset-view__button:hover,
-      .deck-widget-reset-view__button:focus-visible {
+      .deck-widget-reset-view .deck-widget-icon-button:hover,
+      .deck-widget-reset-view .deck-widget-icon-button:focus-visible {
         background: rgba(59, 130, 246, 0.9);
-        outline: none;
-        transform: translateY(-1px);
-      }
-
-      .deck-widget-reset-view__button:active {
-        transform: translateY(0);
       }
     </style>
   </head>
@@ -159,13 +154,6 @@
     <div id="building-controls">
       <button id="fetch-building" type="button">
         Fetch nearest building (pic2bim API)
-      </button>
-      <button
-        id="reset-view-button"
-        type="button"
-        class="deck-widget-reset-view__button"
-      >
-        Reset view
       </button>
       <label for="toggle-basemap">
         <input type="checkbox" id="toggle-basemap" name="toggle-basemap" />
@@ -192,6 +180,14 @@
         parseBuildingHeight,
       } = window.pic2bimBuilding ?? {};
 
+      const resolveResetWidgetCtor = () =>
+        window.deckResetViewWidget ??
+        window.ResetViewWidget ??
+        (window.deckWidgets ? window.deckWidgets.ResetViewWidget : null);
+
+      let ResetViewWidgetCtor = resolveResetWidgetCtor();
+      let resetViewWidget = null;
+
       if (!fetchNearestBuilding) {
         console.warn(
           "pic2bimBuilding helpers are unavailable; building fetches will fail.",
@@ -199,7 +195,6 @@
       }
 
       const fetchBuildingButton = document.getElementById("fetch-building");
-      const resetViewButton = document.getElementById("reset-view-button");
       const buildingStatusElement = document.getElementById("building-status");
 
       const setBuildingStatus = (message, options = {}) => {
@@ -793,7 +788,7 @@
         });
       };
 
-      const initialViewStateStore = createInitialViewStates();
+      let initialViewStateStore = createInitialViewStates();
       let viewStateStore = createInitialViewStates();
       const wrapInitialViewStateForMode = (mode) =>
         wrapViewStateFromStore(mode, initialViewStateStore);
@@ -801,39 +796,38 @@
       let insetUserInteracting = false;
       let insetProgrammaticUpdate = false;
 
-      const getInitialStateForMode = (mode) =>
-        cloneStateEntry(initialViewStateStore[mode]) ?? null;
+      const ensureResetViewWidget = (mode) => {
+        if (!ResetViewWidgetCtor) {
+          return null;
+        }
 
-      const resetCurrentViewState = () => {
+        const viewId = viewModeIds[mode] ?? viewModeIds.firstPerson;
         const initialEntry =
-          getInitialStateForMode(currentViewMode) ??
-          getInitialStateForMode("firstPerson");
+          cloneStateEntry(initialViewStateStore?.[mode]) ??
+          cloneStateEntry(initialViewStateStore?.firstPerson);
 
-        if (!initialEntry) {
-          return;
+        if (!resetViewWidget) {
+          resetViewWidget = new ResetViewWidgetCtor({
+            id: "main-reset-view",
+            placement: "top-right",
+            viewId,
+            label: "Reset view",
+            initialViewState: initialEntry ?? undefined,
+          });
+        } else {
+          resetViewWidget.setProps({
+            viewId,
+            initialViewState: initialEntry ?? undefined,
+          });
         }
 
-        const normalizedInitial = setViewStateForMode(
-          currentViewMode,
-          initialEntry,
-        );
-
-        map.jumpTo({
-          center: [normalizedInitial.longitude, normalizedInitial.latitude],
-          bearing: normalizedInitial.bearing,
-          pitch: normalizedInitial.pitch,
-          zoom: normalizedInitial.zoom,
-        });
-
-        if (currentViewMode !== "firstPerson") {
-          const firstPersonInitial = getInitialStateForMode("firstPerson");
-          if (firstPersonInitial) {
-            setViewStateForMode("firstPerson", firstPersonInitial);
-          }
-        }
-
-        syncDeckFromMap();
+        return resetViewWidget;
       };
+
+      if (ResetViewWidgetCtor || window.deckResetViewWidgetReady) {
+        ResetViewWidgetCtor = ResetViewWidgetCtor ?? resolveResetWidgetCtor();
+        ensureResetViewWidget(currentViewMode);
+      }
 
       if (mapInset) {
         mapInset.on("movestart", () => {
@@ -949,6 +943,7 @@
         viewState: wrapViewStateForMode(currentViewMode),
         layers: [],
         getTooltip: (info) => tooltipFormatter(info),
+        widgets: resetViewWidget ? [resetViewWidget] : [],
         onViewStateChange: ({ viewState, viewId }) => {
           const mode = viewIdToMode[viewId] ?? currentViewMode;
           if (syncingFromMap || mode !== currentViewMode) {
@@ -995,12 +990,29 @@
 
         currentViewMode = mode;
         updateViewStatesFromMap();
+        const widgetForMode = ensureResetViewWidget(mode);
         deckInstance.setProps({
           views: [createViewForMode(mode)],
           viewState: wrapViewStateForMode(mode),
+          widgets: widgetForMode ? [widgetForMode] : [],
         });
         syncInsetViewFromDeck();
       };
+
+      window.addEventListener("deck-reset-view-widget-ready", () => {
+        const nextCtor = resolveResetWidgetCtor();
+        if (!nextCtor) {
+          return;
+        }
+
+        ResetViewWidgetCtor = nextCtor;
+        const widgetForMode = ensureResetViewWidget(currentViewMode);
+        if (deckInstance) {
+          deckInstance.setProps({
+            widgets: widgetForMode ? [widgetForMode] : [],
+          });
+        }
+      });
 
       const handleViewShortcut = (event) => {
         const key = event.key?.toUpperCase();
@@ -1049,12 +1061,6 @@
       if (fetchBuildingButton) {
         fetchBuildingButton.addEventListener("click", () => {
           void handleBuildingFetch();
-        });
-      }
-
-      if (resetViewButton) {
-        resetViewButton.addEventListener("click", () => {
-          resetCurrentViewState();
         });
       }
 

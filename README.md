@@ -21,9 +21,11 @@ must provide your own credentials. Copy `pic2bim-credentials.sample.js` to
 username and password. The `.local.js` file is ignored by git so the secrets are
 never committed to the repository.
 
-The UI also exposes a built-in "Reset view" button in the on-map controls so
-you can restore the camera to its initial orientation while experimenting with
-the various controller modes—no external widget dependencies required.
+The primary deck.gl scene now relies on the
+[`ResetViewWidget`](https://deck.gl/docs/api-reference/widgets/reset-view-widget)
+from `@deck.gl/widgets@9.2`, so you can restore the camera to its initial
+orientation without any custom reset logic—click the widget in the main window
+to jump back to the bundled first-person starting point.
 
 ### Create a Route of your Heritage Trail
 
