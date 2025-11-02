@@ -3,7 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>deck.gl PolygonLayer Example</title>
+    <title>deck.gl GeoJsonLayer (polygons) example</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css"
+      integrity="sha384-fpFqUIfF/iBWSVi5I1UnOjrRCSv2lbRSFLu2FnulS51H3Dfw+8EXlF2C22kfNmdC"
+      crossorigin="anonymous"
+    />
     <link
       rel="stylesheet"
       href="vendor/deck.gl-widgets@9.2.2/deck.gl-widgets.min.css"
@@ -13,22 +19,25 @@
         color-scheme: dark;
       }
 
-      * {
+      *,
+      *::before,
+      *::after {
         box-sizing: border-box;
       }
 
       html,
       body {
-        margin: 0;
         height: 100%;
+        margin: 0;
+        background: #020617;
+        color: #f8fafc;
         font-family:
+          "Inter",
           system-ui,
           -apple-system,
           BlinkMacSystemFont,
           "Segoe UI",
           sans-serif;
-        background: #020617;
-        color: #f8fafc;
       }
 
       #app {
@@ -37,21 +46,21 @@
         width: 100%;
       }
 
-      #deck-canvas {
+      #deck-container {
         position: absolute;
         inset: 0;
       }
 
       #control-panel {
         position: absolute;
-        top: 18px;
-        left: 18px;
-        padding: 16px 18px;
-        max-width: min(320px, 80vw);
+        top: 16px;
+        left: 16px;
         display: flex;
         flex-direction: column;
         gap: 12px;
-        background: rgba(2, 6, 23, 0.8);
+        padding: 16px 18px;
+        width: min(320px, 90vw);
+        background: rgba(2, 6, 23, 0.84);
         border-radius: 12px;
         backdrop-filter: blur(6px);
         box-shadow: 0 16px 40px rgba(15, 23, 42, 0.4);
@@ -71,10 +80,25 @@
         color: #cbd5f5;
       }
 
-      #reset-view-widget {
-        min-height: 44px;
+      #widget-container {
+        display: flex;
+        gap: 12px;
+      }
+
+      .deck-widget {
+        --deck-widget-control-bg: rgba(15, 23, 42, 0.9);
+        --deck-widget-control-color: #f8fafc;
+        --deck-widget-control-border: rgba(148, 163, 184, 0.2);
       }
     </style>
+    <script
+      src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"
+      integrity="sha384-zOZ2nzqlVJnHgLUxeBmcF74+HWCTnCqMM1LsVEfSYFtt0D89nB2ISW/8s8VgbmD4"
+      crossorigin="anonymous"
+    ></script>
+    <script>
+      window.mapboxgl = window.maplibregl;
+    </script>
     <script src="vendor/deck.gl@9.2.2/deck.gl.min.js"></script>
     <script src="vendor/deck.gl-widgets@9.2.2/deck.gl-widgets.min.js"></script>
     <script>
@@ -97,132 +121,106 @@
   </head>
   <body>
     <div id="app">
-      <div id="deck-canvas" aria-label="deck.gl polygon layer example"></div>
+      <div
+        id="deck-container"
+        aria-label="deck.gl GeoJsonLayer polygons example"
+      ></div>
       <div id="control-panel">
-        <h1>PolygonLayer Extrusion</h1>
+        <h1>GeoJsonLayer (polygons)</h1>
         <p>
-          Rendering San Francisco zip code polygons with heights derived from
-          population density, adapted from the deck.gl documentation example.
+          Vancouver block polygons extruded by value per square metre, rendered
+          with deck.gl&apos;s GeoJsonLayer example configuration.
         </p>
-        <div id="reset-view-widget"></div>
+        <div id="widget-container"></div>
       </div>
     </div>
     <script>
       (function main() {
-        const {
-          Deck,
-          MapView,
-          PolygonLayer,
-          AmbientLight,
-          PointLight,
-          LightingEffect,
-          COORDINATE_SYSTEM,
-        } = deck;
+        const MAP_STYLE =
+          "https://basemaps.cartocdn.com/gl/positron-nolabels-gl-style/style.json";
+        const DATA_URL =
+          "https://raw.githubusercontent.com/visgl/deck.gl-data/master/examples/geojson/vancouver-blocks.json";
 
         const INITIAL_VIEW_STATE = {
-          longitude: -122.45,
-          latitude: 37.8,
+          latitude: 49.254,
+          longitude: -123.13,
           zoom: 11,
-          minZoom: 5,
           maxZoom: 16,
           pitch: 45,
           bearing: 0,
         };
 
-        const lightingEffect = new LightingEffect({
-          ambientLight: new AmbientLight({
-            intensity: 0.5,
-            color: [255, 255, 255],
-          }),
-          pointLight1: new PointLight({
-            intensity: 1,
-            color: [255, 255, 255],
-            position: [-122.45, 37.8, 8000],
-          }),
-          pointLight2: new PointLight({
-            intensity: 0.6,
-            color: [255, 255, 255],
-            position: [-122.35, 37.85, 5000],
-          }),
-        });
-
-        const colorScale = (density) => {
-          if (!Number.isFinite(density)) {
-            return [148, 163, 184, 200];
+        const buildWidgets = () => {
+          const widgetsNamespace = deck.widgets;
+          if (!widgetsNamespace) {
+            return [];
           }
-          if (density > 5000) return [248, 113, 113, 255];
-          if (density > 3000) return [251, 191, 36, 255];
-          if (density > 1500) return [52, 211, 153, 255];
-          return [96, 165, 250, 255];
+
+          const instances = [];
+          if (widgetsNamespace.ZoomWidget) {
+            instances.push(
+              new widgetsNamespace.ZoomWidget({
+                container: document.getElementById("widget-container"),
+              }),
+            );
+          }
+
+          if (widgetsNamespace.CompassWidget) {
+            instances.push(
+              new widgetsNamespace.CompassWidget({
+                container: document.getElementById("widget-container"),
+              }),
+            );
+          }
+
+          return instances;
         };
 
-        const polygonLayer = new PolygonLayer({
-          id: "sf-zipcodes",
-          data: "https://raw.githubusercontent.com/visgl/deck.gl-data/master/examples/sf-zipcodes.json",
-          pickable: true,
-          stroked: true,
-          filled: true,
-          extruded: true,
-          wireframe: true,
-          lineWidthMinPixels: 1,
-          getPolygon: (f) => f.contour,
-          getElevation: (f) =>
-            (f.properties.population / f.properties.area) * 10,
-          getFillColor: (f) =>
-            colorScale(f.properties.population / f.properties.area),
-          getLineColor: [30, 41, 59],
-          material: true,
-          coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
-        });
-
-        const getTooltip = ({ object }) => {
-          if (!object) return null;
-          const { zipcode, population, area } = object.properties;
-          const density = population / area;
-          return {
-            html: `
-              <div><strong>ZIP code:</strong> ${zipcode}</div>
-              <div><strong>Population:</strong> ${population.toLocaleString()}</div>
-              <div><strong>Area:</strong> ${area.toFixed(2)} km²</div>
-              <div><strong>Density:</strong> ${density.toFixed(0)} per km²</div>
-            `,
-          };
-        };
-
-        const deckInstance = new Deck({
-          container: "deck-canvas",
-          views: [new MapView({ id: "map-view" })],
+        const deckProps = {
+          container: "deck-container",
           controller: true,
           initialViewState: INITIAL_VIEW_STATE,
-          layers: [polygonLayer],
-          effects: [lightingEffect],
-          getTooltip,
-        });
-
-        const widgetContainer = document.getElementById("reset-view-widget");
-
-        const attachResetWidget = () => {
-          const widgetsNamespace = deck.widgets;
-          if (!widgetsNamespace || !widgetsNamespace.ResetViewWidget) {
-            console.warn("ResetViewWidget namespace unavailable");
-            return;
-          }
-
-          const widget = new widgetsNamespace.ResetViewWidget({
-            container: widgetContainer,
-            onReset: () => {
-              deckInstance.setProps({ viewState: { ...INITIAL_VIEW_STATE } });
-              deckInstance.setProps({ viewState: null });
-            },
-          });
-
-          deckInstance.setProps({ widgets: [widget] });
+          views: [
+            new deck.MapView({
+              controller: true,
+              mapStyle: MAP_STYLE,
+            }),
+          ],
+          layers: [
+            new deck.GeoJsonLayer({
+              id: "vancouver-blocks",
+              data: DATA_URL,
+              opacity: 0.8,
+              stroked: false,
+              filled: true,
+              extruded: true,
+              wireframe: true,
+              elevationScale: 0.1,
+              getElevation: (feature) => feature.properties.valuePerSqm,
+              getFillColor: [199, 233, 180],
+              getLineColor: [255, 255, 255],
+            }),
+          ],
         };
 
-        if (document.readyState === "complete") {
-          attachResetWidget();
-        } else {
-          window.addEventListener("load", attachResetWidget, { once: true });
+        const widgets = buildWidgets();
+        if (widgets.length > 0) {
+          deckProps.widgets = widgets;
+        }
+
+        const deckInstance = new deck.Deck(deckProps);
+
+        if (widgets.length === 0) {
+          window.addEventListener(
+            "load",
+            () => {
+              const lateWidgets = buildWidgets();
+              if (lateWidgets.length > 0) {
+                deckInstance.setProps({ widgets: lateWidgets });
+              }
+            },
+            { once: true },
+          );
         }
       })();
     </script>
