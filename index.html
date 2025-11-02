@@ -14,7 +14,13 @@
       crossorigin="anonymous"
     ></script>
     <script src="https://unpkg.com/pmtiles@4.1.0/dist/pmtiles.js"></script>
-    <script src="https://unpkg.com/deck.gl@9.2.2/dist.min.js"></script>
+    <script src="vendor/deck.gl@9.2.2/deck.gl.min.js"></script>
+    <script src="vendor/deck.gl-widgets@9.2.2/deck.gl-widgets.min.js"></script>
+    <script>
+      if (window.deck && window.deckWidgets) {
+        window.deck.widgets = window.deckWidgets;
+      }
+    </script>
     <script src="pic2bim-building.js"></script>
     <!--
       Copy pic2bim-credentials.sample.js to pic2bim-credentials.local.js and
