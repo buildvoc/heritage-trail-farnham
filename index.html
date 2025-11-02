@@ -200,37 +200,37 @@
         });
 
         const widgetContainer = document.getElementById("reset-view-widget");
-        let resetWidget = null;
 
-        const ensureResetWidget = () => {
+        const createResetWidget = () => {
           const widgetsNamespace = deck.widgets;
           if (!widgetsNamespace || !widgetsNamespace.ResetViewWidget) {
             console.warn("ResetViewWidget is unavailable");
-            return;
+            return null;
           }
 
-          if (typeof deckInstance.addWidget !== "function") {
-            console.warn("Deck instance does not support widgets");
-            return;
-          }
+          return new widgetsNamespace.ResetViewWidget({
+            container: widgetContainer,
+            onReset: () => {
+              deckInstance.setProps({ viewState: { ...INITIAL_VIEW_STATE } });
+              // Clear viewState override to resume controller-driven updates
+              deckInstance.setProps({ viewState: null });
+            },
+          });
+        };
 
+        const attachResetWidget = () => {
+          const resetWidget = createResetWidget();
           if (!resetWidget) {
-            resetWidget = new widgetsNamespace.ResetViewWidget({
-              container: widgetContainer,
-              onReset: () => {
-                deckInstance.setProps({ viewState: { ...INITIAL_VIEW_STATE } });
-                // Clear viewState override to resume controller-driven updates
-                deckInstance.setProps({ viewState: null });
-              },
-            });
-            deckInstance.addWidget(resetWidget);
+            return;
           }
+
+          deckInstance.setProps({ widgets: [resetWidget] });
         };
 
         if (document.readyState === "complete") {
-          ensureResetWidget();
+          attachResetWidget();
         } else {
-          window.addEventListener("load", ensureResetWidget, { once: true });
+          window.addEventListener("load", attachResetWidget, { once: true });
         }
       })();
     </script>
