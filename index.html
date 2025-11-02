@@ -389,11 +389,6 @@
           attributionControl: true,
         });
 
-        STATE.map.addControl(
-          new maplibregl.NavigationControl({ visualizePitch: true }),
-          "top-right",
-        );
-
         STATE.map.on("load", () => {
           const layers = createLayers(config.layers);
           const widgets = createWidgets(config.widgets);
