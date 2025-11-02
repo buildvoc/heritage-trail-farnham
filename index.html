@@ -164,10 +164,41 @@
         const descriptionEl = document.getElementById("example-description");
         const linkEl = document.getElementById("example-link");
 
+        const getPath = (object, path) => {
+          if (!object) {
+            return undefined;
+          }
+
+          return path.split(".").reduce((acc, key) => acc?.[key], object);
+        };
+
+        const expressionToAccessor = (expression) => {
+          const trimmed = expression.trim();
+
+          if (trimmed === "-") {
+            return (object) => object;
+          }
+
+          if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+            const entries = trimmed
+              .slice(1, -1)
+              .split(",")
+              .map((token) => token.trim())
+              .filter(Boolean);
+            return (object) => entries.map((entry) => getPath(object, entry));
+          }
+
+          return (object) => getPath(object, trimmed);
+        };
+
         const toAccessor = (value) => {
-          if (typeof value === "string" && value.startsWith("@@=properties.")) {
-            const propKey = value.slice("@@=properties.".length);
-            return (feature) => feature?.properties?.[propKey];
+          if (typeof value === "string" && value.startsWith("@@=")) {
+            const expression = value.slice("@@=".length);
+            return expressionToAccessor(expression);
+          }
+
+          if (typeof value === "string" && value.startsWith("@@type")) {
+            return value;
           }
 
           return value;
@@ -185,6 +216,10 @@
           switch (type) {
             case "GeoJsonLayer":
               return new deck.GeoJsonLayer({ id, ...resolvedProps });
+            case "ScatterplotLayer":
+              return new deck.ScatterplotLayer({ id, ...resolvedProps });
+            case "LineLayer":
+              return new deck.LineLayer({ id, ...resolvedProps });
             default:
               console.warn(`Unsupported layer type: ${type}`);
               return null;
@@ -194,8 +229,13 @@
         const instantiateView = (viewConfig = {}) => {
           const { "@@type": type, ...rest } = viewConfig;
           switch (type) {
-            case "MapView":
-              return new deck.MapView(rest);
+            case "MapView": {
+              const { mapStyle, ...viewProps } = rest;
+              return {
+                view: new deck.MapView(viewProps),
+                mapStyle,
+              };
+            }
             default:
               console.warn(`Unsupported view type: ${type}`);
               return null;
@@ -209,14 +249,17 @@
 
           const available = deck.widgets;
           return widgetConfigs
-            .map(({ "@@type": type }) => {
+            .map(({ "@@type": type, ...widgetProps }) => {
               const WidgetCtor = available[type];
               if (!WidgetCtor) {
                 console.warn(`Unsupported widget type: ${type}`);
                 return null;
               }
 
-              return new WidgetCtor({ container: widgetContainer });
+              return new WidgetCtor({
+                container: widgetContainer,
+                ...widgetProps,
+              });
             })
             .filter(Boolean);
         };
@@ -252,18 +295,47 @@
 
           updateMetadata(config);
 
-          const views = (config.views || [])
-            .map(instantiateView)
-            .filter(Boolean);
-          const layers = (config.layers || [])
-            .map(instantiateLayer)
-            .filter(Boolean);
-          const widgets = instantiateWidgets(config.widgets || []);
+          const views = [];
+          const mapStyles = [];
+          const viewConfigs = Array.isArray(config.views)
+            ? config.views
+            : config.views
+              ? [config.views]
+              : [];
+          for (const viewConfig of viewConfigs) {
+            const instantiated = instantiateView(viewConfig);
+            if (!instantiated) {
+              continue;
+            }
+
+            if (instantiated.view) {
+              views.push(instantiated.view);
+            }
+
+            if (instantiated.mapStyle) {
+              mapStyles.push(instantiated.mapStyle);
+            }
+          }
+          const layerConfigs = Array.isArray(config.layers)
+            ? config.layers
+            : config.layers
+              ? [config.layers]
+              : [];
+          const layers = layerConfigs.map(instantiateLayer).filter(Boolean);
+          const widgetConfigs = Array.isArray(config.widgets)
+            ? config.widgets
+            : config.widgets
+              ? [config.widgets]
+              : [];
+          const widgets = instantiateWidgets(widgetConfigs);
 
           const deckProps = {
             container: "deck-container",
             initialViewState: config.initialViewState,
-            controller: true,
+            controller:
+              typeof config.controller !== "undefined"
+                ? config.controller
+                : true,
           };
 
           if (views.length > 0) {
@@ -276,6 +348,20 @@
 
           if (widgets.length > 0) {
             deckProps.widgets = widgets;
+          }
+
+          if (config.map || mapStyles.length > 0) {
+            deckProps.map = window.maplibregl;
+          }
+
+          if (mapStyles.length > 0) {
+            deckProps.mapStyle = mapStyles[0];
+          } else if (config.mapStyle) {
+            deckProps.mapStyle = config.mapStyle;
+          }
+
+          if (typeof config.pickingRadius === "number") {
+            deckProps.pickingRadius = config.pickingRadius;
           }
 
           new deck.Deck(deckProps);
