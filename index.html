@@ -13,6 +13,10 @@
         color-scheme: dark;
       }
 
+      * {
+        box-sizing: border-box;
+      }
+
       html,
       body {
         margin: 0;
@@ -30,6 +34,7 @@
       #app {
         position: relative;
         height: 100%;
+        width: 100%;
       }
 
       #deck-canvas {
@@ -39,31 +44,30 @@
 
       #control-panel {
         position: absolute;
-        top: 16px;
-        left: 16px;
+        top: 18px;
+        left: 18px;
+        padding: 16px 18px;
+        max-width: min(320px, 80vw);
         display: flex;
         flex-direction: column;
         gap: 12px;
-        padding: 16px 18px;
-        max-width: min(320px, 80vw);
+        background: rgba(2, 6, 23, 0.8);
         border-radius: 12px;
-        background: rgba(2, 6, 23, 0.78);
         backdrop-filter: blur(6px);
         box-shadow: 0 16px 40px rgba(15, 23, 42, 0.4);
-        z-index: 10;
+        z-index: 5;
       }
 
       #control-panel h1 {
         margin: 0;
         font-size: 1.1rem;
         font-weight: 600;
-        letter-spacing: 0.01em;
       }
 
       #control-panel p {
         margin: 0;
         font-size: 0.9rem;
-        line-height: 1.4;
+        line-height: 1.45;
         color: #cbd5f5;
       }
 
@@ -74,8 +78,8 @@
     <script src="vendor/deck.gl@9.2.2/deck.gl.min.js"></script>
     <script src="vendor/deck.gl-widgets@9.2.2/deck.gl-widgets.min.js"></script>
     <script>
-      (function ensureWidgetNamespace() {
-        const mergeWidgets = () => {
+      (function bridgeWidgetNamespace() {
+        const connect = () => {
           if (!window.deck || !window.deckWidgets) {
             return;
           }
@@ -86,33 +90,33 @@
           };
         };
 
-        mergeWidgets();
-        window.addEventListener("load", mergeWidgets, { once: true });
+        connect();
+        window.addEventListener("load", connect, { once: true });
       })();
     </script>
   </head>
   <body>
     <div id="app">
-      <div id="deck-canvas" aria-label="deck.gl polygon example"></div>
+      <div id="deck-canvas" aria-label="deck.gl polygon layer example"></div>
       <div id="control-panel">
         <h1>PolygonLayer Extrusion</h1>
         <p>
-          A deck.gl PolygonLayer rendering San Francisco zip code polygons with
-          heights derived from population density.
+          Rendering San Francisco zip code polygons with heights derived from
+          population density, adapted from the deck.gl documentation example.
         </p>
         <div id="reset-view-widget"></div>
       </div>
     </div>
     <script>
-      (function initDeck() {
+      (function main() {
         const {
           Deck,
           MapView,
           PolygonLayer,
-          COORDINATE_SYSTEM,
           AmbientLight,
           PointLight,
           LightingEffect,
+          COORDINATE_SYSTEM,
         } = deck;
 
         const INITIAL_VIEW_STATE = {
@@ -125,36 +129,35 @@
           bearing: 0,
         };
 
-        const lights = new LightingEffect({
+        const lightingEffect = new LightingEffect({
           ambientLight: new AmbientLight({
-            color: [255, 255, 255],
             intensity: 0.5,
+            color: [255, 255, 255],
           }),
           pointLight1: new PointLight({
-            color: [255, 255, 255],
             intensity: 1,
+            color: [255, 255, 255],
             position: [-122.45, 37.8, 8000],
           }),
           pointLight2: new PointLight({
-            color: [255, 255, 255],
             intensity: 0.6,
+            color: [255, 255, 255],
             position: [-122.35, 37.85, 5000],
           }),
         });
 
         const colorScale = (density) => {
           if (!Number.isFinite(density)) {
-            return [148, 163, 184, 180];
+            return [148, 163, 184, 200];
           }
-
           if (density > 5000) return [248, 113, 113, 255];
           if (density > 3000) return [251, 191, 36, 255];
           if (density > 1500) return [52, 211, 153, 255];
           return [96, 165, 250, 255];
         };
 
-        const layer = new PolygonLayer({
-          id: "population-density",
+        const polygonLayer = new PolygonLayer({
+          id: "sf-zipcodes",
           data: "https://raw.githubusercontent.com/visgl/deck.gl-data/master/examples/sf-zipcodes.json",
           pickable: true,
           stroked: true,
@@ -169,13 +172,10 @@
             colorScale(f.properties.population / f.properties.area),
           getLineColor: [30, 41, 59],
           material: true,
-          parameters: {
-            depthTest: true,
-          },
           coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
         });
 
-        const tooltip = ({ object }) => {
+        const getTooltip = ({ object }) => {
           if (!object) return null;
           const { zipcode, population, area } = object.properties;
           const density = population / area;
@@ -191,40 +191,32 @@
 
         const deckInstance = new Deck({
           container: "deck-canvas",
-          views: [new MapView({ id: "main-map" })],
+          views: [new MapView({ id: "map-view" })],
           controller: true,
           initialViewState: INITIAL_VIEW_STATE,
-          layers: [layer],
-          getTooltip: tooltip,
-          effects: [lights],
+          layers: [polygonLayer],
+          effects: [lightingEffect],
+          getTooltip,
         });
 
         const widgetContainer = document.getElementById("reset-view-widget");
 
-        const createResetWidget = () => {
+        const attachResetWidget = () => {
           const widgetsNamespace = deck.widgets;
           if (!widgetsNamespace || !widgetsNamespace.ResetViewWidget) {
-            console.warn("ResetViewWidget is unavailable");
-            return null;
-          }
-
-          return new widgetsNamespace.ResetViewWidget({
-            container: widgetContainer,
-            onReset: () => {
-              deckInstance.setProps({ viewState: { ...INITIAL_VIEW_STATE } });
-              // Clear viewState override to resume controller-driven updates
-              deckInstance.setProps({ viewState: null });
-            },
-          });
-        };
-
-        const attachResetWidget = () => {
-          const resetWidget = createResetWidget();
-          if (!resetWidget) {
+            console.warn("ResetViewWidget namespace unavailable");
             return;
           }
 
-          deckInstance.setProps({ widgets: [resetWidget] });
+          const widget = new widgetsNamespace.ResetViewWidget({
+            container: widgetContainer,
+            onReset: () => {
+              deckInstance.setProps({ viewState: { ...INITIAL_VIEW_STATE } });
+              deckInstance.setProps({ viewState: null });
+            },
+          });
+
+          deckInstance.setProps({ widgets: [widget] });
         };
 
         if (document.readyState === "complete") {
