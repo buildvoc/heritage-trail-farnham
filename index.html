@@ -258,6 +258,7 @@
         widgets: [],
         tooltip: document.getElementById("tooltip"),
         loading: document.getElementById("loading"),
+        widgetObserver: null,
       };
 
       function showLoading(isVisible) {
@@ -413,8 +414,65 @@
                 : null,
           });
           STATE.map.addControl(STATE.overlay);
+          monitorWidgetMount();
           showLoading(false);
         });
+      }
+
+      function verifyWidgetDom(container) {
+        if (!container) {
+          return false;
+        }
+        const topLeftContainer = container.querySelector(
+          ".deck-widget-container.top-left",
+        );
+        if (!topLeftContainer) {
+          return false;
+        }
+        const zoomWidget = topLeftContainer.querySelector(
+          ".deck-widget.deck-widget-zoom .deck-widget-zoom-in",
+        );
+        const compassWidget = topLeftContainer.querySelector(
+          ".deck-widget.deck-widget-compass",
+        );
+        if (zoomWidget && compassWidget) {
+          console.debug("Deck widget container detected:", topLeftContainer);
+        } else {
+          console.warn(
+            "Deck widget container found but expected widgets are missing.",
+          );
+        }
+        return Boolean(zoomWidget && compassWidget);
+      }
+
+      function monitorWidgetMount() {
+        const mapContainer = STATE.map?.getContainer?.();
+        if (!mapContainer) {
+          return;
+        }
+        if (verifyWidgetDom(mapContainer)) {
+          return;
+        }
+        if (STATE.widgetObserver) {
+          STATE.widgetObserver.disconnect();
+        }
+        STATE.widgetObserver = new MutationObserver(() => {
+          if (verifyWidgetDom(mapContainer) && STATE.widgetObserver) {
+            STATE.widgetObserver.disconnect();
+            STATE.widgetObserver = null;
+          }
+        });
+        STATE.widgetObserver.observe(mapContainer, {
+          childList: true,
+          subtree: true,
+        });
+        window.setTimeout(() => {
+          if (!verifyWidgetDom(mapContainer)) {
+            console.warn(
+              "Deck widget container not detected after timeout. Verify widget bundle availability.",
+            );
+          }
+        }, 3000);
       }
 
       function initEditor(config) {
