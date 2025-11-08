@@ -1,12 +1,27 @@
-## This is an example of a walking route in Farnham Surrey England
+# deck.gl Playground &ndash; GeoJsonLayer replica
 
-see offical council webpage [Farnham Heritage Trail](https://www.farnham.gov.uk/things-to-do/getting-outside/walks-and-countryside/heritagetrail)
+This repository mirrors the deck.gl playground configuration for the
+[GeoJsonLayer (polygons) example](https://deck.gl/#/examples/core-layers/geojson-layer-polygons).
+The page displays the official JSON definition on the left and renders the
+Vancouver property value dataset on the right with MapLibre GL and deck.gl,
+matching the playground layout shown in the deck.gl documentation.
 
-Blog: https://bertt.wordpress.com/2025/01/10/creating-interactive-3d-hiking-map/
+## Running locally
 
-Live demo: [https://buildvoc.github.io/heritage-trail-farnham/](https://buildvoc.github.io/heritage-trail-farnham/)
+Open `index.html` in a modern browser. The page pulls its dependencies from
+CDNs:
 
-![Terrain-Building-height updates-14](https://github.com/user-attachments/assets/1d4c111d-4e67-4b2f-bcfb-5c9b21167da5)
+- MapLibre GL JS 3.6.2
+- deck.gl 9.2.2 and the accompanying widgets bundle
+- Monaco Editor 0.45.0 for the read-only JSON panel
 
-### Create a Route of your Heritage Trail
-After you have created your route on [Active Travel Scheme Sketcher](https://plan.activetravelengland.gov.uk/index.html)
+An internet connection is required to load the remote dataset, basemap style,
+and CDN bundles.
+
+## What you should see
+
+A two-column layout with a configuration selector and JSON editor on the left
+and an interactive 3D map on the right. The map extrudes Vancouver blocks using
+their `valuePerSqm` attribute, includes MapLibre navigation controls, and shows
+a tooltip with the formatted property value when you hover a block. Zoom and
+compass widgets from deck.gl appear in the upper-right corner of the map.
