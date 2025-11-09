@@ -1,12 +1,26 @@
-## This is an example of a walking route in Farnham Surrey England
+This is a minimal standalone version of the GeoJsonLayer (Polygons) example
+on [deck.gl](http://deck.gl) website.
 
-see offical council webpage [Farnham Heritage Trail](https://www.farnham.gov.uk/things-to-do/getting-outside/walks-and-countryside/heritagetrail)
+### Usage
 
-Blog: https://bertt.wordpress.com/2025/01/10/creating-interactive-3d-hiking-map/
+Copy the content of this folder to your project. 
 
-Live demo: [https://buildvoc.github.io/heritage-trail-farnham/](https://buildvoc.github.io/heritage-trail-farnham/)
+```bash
+# install dependencies
+npm install
+# or
+yarn
+# bundle and serve the app with vite
+npm start
+```
 
-![Terrain-Building-height updates-14](https://github.com/user-attachments/assets/1d4c111d-4e67-4b2f-bcfb-5c9b21167da5)
+### Data format
 
-### Create a Route of your Heritage Trail
-After you have created your route on [Active Travel Scheme Sketcher](https://plan.activetravelengland.gov.uk/index.html)
+Sample data is stored in [deck.gl Example Data](https://github.com/visgl/deck.gl-data/tree/master/examples/geojson), showing the property values of Vancouver. [Source](http://data.vancouver.ca/)
+
+To use your own data, check out
+the [documentation of GeoJsonLayer](../../../docs/api-reference/layers/geojson-layer.md).
+
+### Basemap
+
+The basemap in this example is provided by [CARTO free basemap service](https://carto.com/basemaps). To use an alternative base map solution, visit [this guide](https://deck.gl/docs/get-started/using-with-map#using-other-basemap-services)
