@@ -9,6 +9,7 @@ import {DeckGL} from '@deck.gl/react';
 import {GeoJsonLayer, PolygonLayer} from '@deck.gl/layers';
 import {LightingEffect, AmbientLight, _SunLight as SunLight} from '@deck.gl/core';
 import {scaleThreshold} from 'd3-scale';
+import {ZoomWidget} from '@deck.gl/widgets';
 
 import type {Color, Position, PickingInfo, MapViewState} from '@deck.gl/core';
 import type {Feature, Geometry} from 'geojson';
@@ -131,6 +132,7 @@ export default function App({
       effects={effects}
       initialViewState={INITIAL_VIEW_STATE}
       controller={true}
+      widgets={[new ZoomWidget()]}
       getTooltip={getTooltip}
     >
       <Map reuseMaps mapStyle={mapStyle} />
